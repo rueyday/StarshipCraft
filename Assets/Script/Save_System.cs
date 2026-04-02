@@ -1,34 +1,33 @@
 using UnityEngine;
 using System.IO;
-using System.Runtime.Serialization.Formatters.Binary;
 
 public static class Save_System
 {
-    public static void Save_Player(Object_Handler Player){
-        BinaryFormatter formatter = new BinaryFormatter();
-        string path = Application.persistentDataPath + "/player.test";
-        FileStream stream = new FileStream(path, FileMode.Create);
+    static string SavePath => Application.persistentDataPath + "/player.json";
 
-        Player_Data data = new Player_Data(Player);
-
-        formatter.Serialize(stream, data);
-        stream.Close();
-        Debug.Log("Saved");
+    public static void Save_Player(Object_Handler player)
+    {
+        Player_Data data = new Player_Data(player);
+        string json = JsonUtility.ToJson(data, true);
+        File.WriteAllText(SavePath, json);
+        Debug.Log("Saved to " + SavePath);
     }
-    
-    public static Player_Data LoadPlayer(){
-        string path = Application.persistentDataPath + "/player.test";
-        if(File.Exists(path)){
-            BinaryFormatter formatter = new BinaryFormatter();
-            FileStream stream = new FileStream(path, FileMode.Open);
 
-            Player_Data data = formatter.Deserialize(stream) as Player_Data;
-            stream.Close();
-
+    public static Player_Data LoadPlayer()
+    {
+        if (File.Exists(SavePath))
+        {
+            string json = File.ReadAllText(SavePath);
+            Player_Data data = JsonUtility.FromJson<Player_Data>(json);
+            Debug.Log("Loaded from " + SavePath);
             return data;
-        }else{
-            Debug.LogError("Save file not found in"+path);
-            return null;
         }
+        Debug.LogWarning("No save file found at " + SavePath);
+        return null;
+    }
+
+    public static bool HasSave()
+    {
+        return File.Exists(SavePath);
     }
 }

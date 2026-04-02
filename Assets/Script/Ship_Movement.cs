@@ -1,70 +1,103 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class Ship_Movement : MonoBehaviour
 {
-    Rigidbody spaceship;
-    float verticalMove;
-    float horizontalMove;
-    float mouseInputX;
-    float mouseInputY;
-    float rollInput;
+    Rigidbody rb;
 
-    [SerializeField]
-    float speedMult = 1f; //1
-    [SerializeField]
-    float speedMultAngle = 0.5f; //0.2
-    [SerializeField]
-    float speedRollMultAngle = 0.05f;
+    [Header("Thrust")]
+    [SerializeField] float forwardThrust = 20f;
+    [SerializeField] float strafeThrust = 12f;
+    [SerializeField] float boostMultiplier = 2.5f;
+    [SerializeField] float maxSpeed = 40f;
 
+    [Header("Rotation")]
+    [SerializeField] float pitchSensitivity = 80f;
+    [SerializeField] float yawSensitivity = 60f;
+    [SerializeField] float rollSpeed = 60f;
+
+    [Header("Braking")]
+    [SerializeField] float brakeForce = 15f;
+
+    // Optional: reference to a child for center of mass offset
     public GameObject Location_child;
 
-    GameObject Ref;
-    Object_Handler Handler;
-    // Start is called before the first frame update
     void Start()
     {
-        Ref = GameObject.Find("GameManager");
-        Handler = Ref.GetComponent<Object_Handler>();
+        rb = GetComponent<Rigidbody>();
+        rb.useGravity = false;
+        rb.drag = 0.5f;
+        rb.angularDrag = 3f;
 
-        Vector3 childOffset;
-        childOffset.x = 0;
-        childOffset.y = 0;
-        childOffset.z = 0;
-        for(int i = 0; i<400; ++i){
-            if(Handler.Data_Mode[i] != 200){
-                childOffset.x = (childOffset.x+Handler.Data_X[i])/2;
-                childOffset.y = (childOffset.y+Handler.Data_Y[i])/2;
-                childOffset.z = (childOffset.z+Handler.Data_Z[i])/2;
+        // Set center of mass from thruster positions if Location_child is assigned
+        if (Location_child != null)
+        {
+            Object_Handler handler = Object_Handler.Instance;
+            if (handler != null)
+            {
+                Vector3 com = Vector3.zero;
+                int count = 0;
+                for (int i = 0; i < handler.index; i++)
+                {
+                    if (handler.Data_Mode[i] == 200) // Thruster
+                    {
+                        com.x += handler.Data_X[i];
+                        com.y += handler.Data_Y[i];
+                        com.z += handler.Data_Z[i];
+                        count++;
+                    }
+                }
+                if (count > 0)
+                    Location_child.transform.localPosition = com / count;
             }
         }
-        Location_child.transform.localPosition = childOffset;
-
 
         Cursor.lockState = CursorLockMode.Locked;
-        spaceship = GetComponent<Rigidbody>();
+        Cursor.visible = false;
     }
 
-    // Update is called once per frame
-    void Update()
+    void FixedUpdate()
     {
-        verticalMove = Input.GetAxis("Vertical");
-        horizontalMove = Input.GetAxis("Horizontal");
-        rollInput = Input.GetAxis("Roll");
+        bool boost = Input.GetKey(KeyCode.LeftShift);
+        float thrustScale = boost ? boostMultiplier : 1f;
 
-        mouseInputX = Input.GetAxis("Mouse X");
-        mouseInputY = Input.GetAxis("Mouse Y");
-        //Debug.Log(""+verticalMove);
+        float forward = Input.GetAxis("Vertical");
+        float strafe  = Input.GetAxis("Horizontal");
+
+        // Forward / backward thrust
+        Vector3 forceDir = transform.forward * forward * forwardThrust * thrustScale;
+        // Lateral strafe (A/D)
+        forceDir += transform.right * strafe * strafeThrust * thrustScale;
+
+        rb.AddForce(forceDir, ForceMode.Force);
+
+        // Hard brake (Space)
+        if (Input.GetKey(KeyCode.Space))
+        {
+            Vector3 brakeVel = rb.velocity;
+            rb.AddForce(-brakeVel.normalized * brakeForce, ForceMode.Force);
+        }
+
+        // Cap speed
+        if (rb.velocity.magnitude > maxSpeed)
+            rb.velocity = rb.velocity.normalized * maxSpeed;
+
+        // Mouse pitch and yaw
+        float mouseX = Input.GetAxis("Mouse X");
+        float mouseY = Input.GetAxis("Mouse Y");
+
+        rb.AddTorque(transform.up    *  mouseX * yawSensitivity   * Time.fixedDeltaTime, ForceMode.VelocityChange);
+        rb.AddTorque(transform.right * -mouseY * pitchSensitivity  * Time.fixedDeltaTime, ForceMode.VelocityChange);
+
+        // Roll with Q / E
+        float roll = 0f;
+        if (Input.GetKey(KeyCode.Q)) roll =  1f;
+        if (Input.GetKey(KeyCode.E)) roll = -1f;
+        rb.AddTorque(transform.forward * roll * rollSpeed * Time.fixedDeltaTime, ForceMode.VelocityChange);
     }
-    void FixedUpdate(){
-        //Debug.Log(""+verticalMove);
-        Vector3 position = Location_child.transform.position;
-        spaceship.AddForceAtPosition(spaceship.transform.TransformDirection(Vector3.forward)*verticalMove*speedMult, position ,ForceMode.VelocityChange);
-        //spaceship.AddForce(spaceship.transform.TransformDirection(Vector3.right)*horizontalMove*speedMult, ForceMode.VelocityChange);
-        spaceship.AddTorque(spaceship.transform.right*speedMultAngle* mouseInputY*-1, ForceMode.VelocityChange);
-        spaceship.AddTorque(spaceship.transform.up*speedMultAngle* horizontalMove * 3/10, ForceMode.VelocityChange);
 
-        spaceship.AddTorque(spaceship.transform.forward*speedRollMultAngle*rollInput, ForceMode.VelocityChange);
+    void OnDestroy()
+    {
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
     }
 }

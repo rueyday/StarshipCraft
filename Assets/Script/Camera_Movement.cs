@@ -1,67 +1,59 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
+// Orbit camera for the Builder scene.
+// Attach this to the camera or a controller object.
+// Drag or arrow-key to orbit, scroll wheel to zoom.
 public class Camera_Movement : MonoBehaviour
 {
     [SerializeField] private Camera cam;
-    public float speed = 5f;
-    private Vector3 previousPosition;
-    public Vector3 direction;
 
-    Vector3 Final_position = new Vector3();
-    // Update is called once per frame
-    void Start(){
-            direction = new Vector3();
+    [Header("Orbit")]
+    [SerializeField] float orbitSpeed = 120f;       // degrees per second (arrow keys)
+    [SerializeField] float mouseSensitivity = 3f;   // degrees per pixel (drag)
 
-            cam.transform.position = new Vector3();
+    [Header("Zoom")]
+    [SerializeField] float distance = 10f;
+    [SerializeField] float minDistance = 3f;
+    [SerializeField] float maxDistance = 30f;
+    [SerializeField] float zoomSpeed = 4f;
 
-            cam.transform.Rotate(new Vector3(1, 0, 0), direction.y*180);
-            cam.transform.Rotate(new Vector3(0, 1, 0), -direction.x*180, Space.World);
-            cam.transform.Translate(new Vector3(0,0,-10));
-            previousPosition = cam.ScreenToViewportPoint(Input.mousePosition);
+    float yaw   = 30f;   // horizontal angle
+    float pitch = 20f;   // vertical angle
+
+    void Start()
+    {
+        if (cam == null)
+            cam = Camera.main;
     }
+
     void Update()
     {
-        Vector3 moveDirection = new Vector3();
-        if (Input.GetKey(KeyCode.UpArrow))
-        {
-            moveDirection += Vector3.right; // Move forward
-        }
-        if (Input.GetKey(KeyCode.DownArrow))
-        {
-            moveDirection += Vector3.left; // Move backward
-        }
-        if (Input.GetKey(KeyCode.LeftArrow))
-        {
-            moveDirection += Vector3.forward; // Move left
-        }
-        if (Input.GetKey(KeyCode.RightArrow))
-        {
-            moveDirection += Vector3.back; // Move right
-        }
-        
-        Final_position += moveDirection* speed* Time.deltaTime;
-        if(Input.GetKey(KeyCode.LeftShift)){
-        if(Input.GetMouseButtonDown(0)){
-            previousPosition = cam.ScreenToViewportPoint(Input.mousePosition);
-        }
-        if(Input.GetMouseButton(0)){
-            direction = previousPosition-cam.ScreenToViewportPoint(Input.mousePosition);
+        // ---- Arrow key orbit ----
+        if (Input.GetKey(KeyCode.LeftArrow))  yaw   -= orbitSpeed * Time.deltaTime;
+        if (Input.GetKey(KeyCode.RightArrow)) yaw   += orbitSpeed * Time.deltaTime;
+        if (Input.GetKey(KeyCode.UpArrow))    pitch -= orbitSpeed * Time.deltaTime;
+        if (Input.GetKey(KeyCode.DownArrow))  pitch += orbitSpeed * Time.deltaTime;
 
-            cam.transform.position = Final_position;
-            //moveDirection* Time.deltaTime;
+        // ---- Mouse drag orbit (hold left mouse button) ----
+        if (Input.GetMouseButton(0))
+        {
+            yaw   += Input.GetAxis("Mouse X") * mouseSensitivity;
+            pitch -= Input.GetAxis("Mouse Y") * mouseSensitivity;
+        }
 
-            cam.transform.Rotate(new Vector3(1, 0, 0), direction.y*180);
-            cam.transform.Rotate(new Vector3(0, 1, 0), -direction.x*180, Space.World);
-            cam.transform.Translate(new Vector3(0,0,-10));
-            previousPosition = cam.ScreenToViewportPoint(Input.mousePosition);
-        }
-        }else{
-            //Debug.Log("Run");
-            cam.transform.position = Final_position;
-            cam.transform.Translate(new Vector3(0,0,-10));
-            //previousPosition = cam.ScreenToViewportPoint(Input.mousePosition);
-        }
+        // Clamp vertical angle to avoid flipping
+        pitch = Mathf.Clamp(pitch, -80f, 80f);
+
+        // ---- Scroll wheel zoom ----
+        float scroll = Input.GetAxis("Mouse ScrollWheel");
+        distance -= scroll * zoomSpeed;
+        distance = Mathf.Clamp(distance, minDistance, maxDistance);
+
+        // ---- Apply orbit around origin (0,0,0) ----
+        Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
+        Vector3 position = rotation * new Vector3(0f, 0f, -distance);
+
+        cam.transform.position = position;
+        cam.transform.rotation = rotation;
     }
 }
