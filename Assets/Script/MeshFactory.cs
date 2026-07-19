@@ -3,24 +3,71 @@ using UnityEngine;
 
 public static class MeshFactory
 {
-    // Dart-shaped spaceship: pointed nose, swept wings, dorsal fin
-    public static Mesh CreateShipMesh()
+    static Mesh cube;
+
+    // Unit cube with hard-edged normals (24 verts), shared by every block.
+    public static Mesh CubeMesh()
     {
-        var verts = new Vector3[]
+        if (cube != null) return cube;
+        var v = new List<Vector3>();
+        var t = new List<int>();
+        var normals = new[]
         {
-            new Vector3( 0.00f,  0.00f,  1.80f), // 0 nose
-            new Vector3(-1.20f, -0.10f, -0.80f), // 1 left wing tip
-            new Vector3( 1.20f, -0.10f, -0.80f), // 2 right wing tip
-            new Vector3( 0.00f, -0.10f, -1.20f), // 3 tail
-            new Vector3( 0.00f,  0.55f, -0.15f), // 4 dorsal fin
-            new Vector3( 0.00f, -0.20f,  0.30f), // 5 belly
+            Vector3.up, Vector3.down, Vector3.left,
+            Vector3.right, Vector3.forward, Vector3.back,
         };
-        var tris = new int[]
+        foreach (var n in normals)
         {
-            0, 4, 2,  0, 1, 4,  1, 3, 4,  4, 3, 2,  // top faces
-            0, 2, 5,  0, 5, 1,  1, 5, 3,  5, 2, 3,  // bottom faces
-        };
-        return Build("Ship", verts, tris);
+            Vector3 u = Vector3.Cross(n, Mathf.Abs(n.y) > 0.5f ? Vector3.forward : Vector3.up);
+            Vector3 w = Vector3.Cross(n, u);
+            int b = v.Count;
+            v.Add((n - u - w) * 0.5f); v.Add((n - u + w) * 0.5f);
+            v.Add((n + u + w) * 0.5f); v.Add((n + u - w) * 0.5f);
+            t.AddRange(new[] { b, b + 2, b + 1, b, b + 3, b + 2 });
+        }
+        cube = Build("Cube", v.ToArray(), t.ToArray());
+        return cube;
+    }
+
+    // Capped truncated cone along +Z: radius r0 at z=0, r1 at z=height.
+    public static Mesh CreateCone(float r0, float r1, float height, int segs = 16)
+    {
+        var v = new List<Vector3>();
+        var t = new List<int>();
+        for (int i = 0; i < segs; i++)
+        {
+            float a = i * Mathf.PI * 2f / segs;
+            float c = Mathf.Cos(a), s = Mathf.Sin(a);
+            v.Add(new Vector3(c * r0, s * r0, 0f));
+            v.Add(new Vector3(c * r1, s * r1, height));
+        }
+        int baseC = v.Count; v.Add(new Vector3(0f, 0f, 0f));
+        int topC  = v.Count; v.Add(new Vector3(0f, 0f, height));
+        for (int i = 0; i < segs; i++)
+        {
+            int i0 = i * 2, i1 = i * 2 + 1;
+            int j0 = ((i + 1) % segs) * 2, j1 = j0 + 1;
+            t.AddRange(new[] { i0, j0, i1, j0, j1, i1 }); // side
+            t.AddRange(new[] { baseC, j0, i0 });          // base cap (faces -Z)
+            t.AddRange(new[] { topC, i1, j1 });           // top cap (faces +Z)
+        }
+        return Build("Cone", v.ToArray(), t.ToArray());
+    }
+
+    // One mesh containing a cube per occupied grid cell. Assigned to a convex
+    // MeshCollider, PhysX cooks it down to the ship's convex hull.
+    public static Mesh BuildHullMesh(IEnumerable<Vector3Int> cells)
+    {
+        var v = new List<Vector3>();
+        var t = new List<int>();
+        var src = CubeMesh();
+        foreach (var c in cells)
+        {
+            int b = v.Count;
+            foreach (var p in src.vertices) v.Add(p + (Vector3)c);
+            foreach (var i in src.triangles) t.Add(b + i);
+        }
+        return Build("Hull", v.ToArray(), t.ToArray());
     }
 
     // Icosphere with Perlin-noise displacement — looks like a rocky asteroid
@@ -74,7 +121,7 @@ public static class MeshFactory
 
     static int Mid(int a, int b, List<Vector3> v, Dictionary<long, int> c)
     {
-        long key = (long)Mathf.Min(a,b) * 1_000_000 + Mathf.Max(a,b);
+        long key = (long)Mathf.Min(a,b) * 1000000 + Mathf.Max(a,b);
         if (c.TryGetValue(key, out int idx)) return idx;
         idx = v.Count;
         v.Add(((v[a] + v[b]) * 0.5f).normalized);

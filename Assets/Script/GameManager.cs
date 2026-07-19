@@ -1,31 +1,33 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
-// Drop one empty GameObject called "GameManager" in any scene and attach this.
-// Everything else is created at runtime — no other scene setup needed.
+// Single entry point. Drop this on one empty GameObject in an empty scene.
+// Flow: Menu → (Settings) → Build → Playing → GameOver → Build again.
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    enum State { Menu, Playing, Dead, GameOver }
+    enum State { Menu, Settings, Build, Playing, GameOver }
     State state = State.Menu;
 
-    [SerializeField] int   startLives    = 3;
-    [SerializeField] int   baseAsteroids = 5;
-    [SerializeField] float spawnRadius   = 80f;
-    [SerializeField] float safeRadius    = 18f;
+    // World population, driven by GameSettings.
+    const float AsteroidSpawnRadius = 120f;
+    const float NPCSpawnRadius      = 160f;
+    const float DespawnRadius       = 400f;
 
-    int   score, wave, lives;
-    float deadTimer;
-
-    PlayerShip player;
-    Camera     cam;
+    public Ship PlayerShip { get; private set; }
+    public readonly List<Ship> Ships = new List<Ship>();
     readonly List<Asteroid> asteroids = new List<Asteroid>();
 
-    // ── HUD styles ───────────────────────────────────────────────────────────
-    GUIStyle sTitle, sMed, sSmall;
-    bool stylesBuilt;
+    ShipBlueprint blueprint;
+    ShipBuilder builder;
+    Camera cam;
+    Transform starfieldRoot;
+    int score;
+    float playTime;
+    float asteroidTimer, enemyTimer, allyTimer;
+    float shake;
+    float fov = 60f;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -37,115 +39,169 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        SetupCamera();
-        SpawnPlayer(Vector3.zero);
+        cam = Camera.main;
+        if (cam == null)
+        {
+            var g = new GameObject("Main Camera") { tag = "MainCamera" };
+            cam = g.AddComponent<Camera>();
+            g.AddComponent<AudioListener>();
+        }
+        cam.clearFlags      = CameraClearFlags.SolidColor;
+        cam.backgroundColor = new Color(0.01f, 0.015f, 0.045f);
+        cam.farClipPlane    = 1500f;
+
+        RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
+        RenderSettings.ambientLight = new Color(0.18f, 0.2f, 0.28f);
+        var sun = new GameObject("Sun").AddComponent<Light>();
+        sun.type = LightType.Directional;
+        sun.intensity = 0.9f;
+        sun.color = new Color(0.85f, 0.9f, 1f);
+        sun.transform.rotation = Quaternion.Euler(35f, -60f, 0f);
+
+        // Starfield follows the camera's position (not rotation) so the stars
+        // read as infinitely distant no matter how far the player flies.
+        starfieldRoot = new GameObject("StarfieldRoot").transform;
+        FX.Starfield(starfieldRoot);
+        blueprint = DefaultPlayerBlueprint();
     }
 
     void Update()
     {
+        if (starfieldRoot != null) starfieldRoot.position = cam.transform.position;
+
         switch (state)
         {
             case State.Menu:
-                if (Input.anyKeyDown) StartGame();
+            case State.Settings:
+                break;
+
+            case State.Build:
+                if (Input.GetKeyDown(KeyCode.Return) && ReadyToLaunch()) Launch();
                 break;
 
             case State.Playing:
+                playTime += Time.deltaTime;
+                MaintainPopulation();
                 FollowCamera();
-                if (asteroids.Count == 0) StartWave();
-                break;
-
-            case State.Dead:
-                deadTimer -= Time.deltaTime;
-                FollowCamera();
-                if (deadTimer <= 0f) Respawn();
                 break;
 
             case State.GameOver:
-                if (Input.GetKeyDown(KeyCode.R)) SceneManager.LoadScene(0);
+                if (Input.GetKeyDown(KeyCode.R)) EnterBuild();
                 break;
         }
     }
 
-    // ── Game flow ────────────────────────────────────────────────────────────
+    // ── State transitions ────────────────────────────────────────────────────
 
-    void StartGame()
+    void EnterBuild()
     {
-        score = 0; wave = 0; lives = startLives;
-        state = State.Playing;
+        ClearWorld();
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+
+        var go = new GameObject("Builder");
+        builder = go.AddComponent<ShipBuilder>();
+        builder.Init(blueprint, cam);
+        state = State.Build;
+    }
+
+    bool ReadyToLaunch() => blueprint.Count(BlockType.Thruster) > 0;
+
+    void Launch()
+    {
+        Destroy(builder.gameObject);
+        builder = null;
+
+        score = 0;
+        playTime = 0f;
+        PlayerShip = SpawnShip(blueprint, Faction.Player, Vector3.zero, Quaternion.identity);
+        PlayerShip.gameObject.AddComponent<PlayerController>();
+
+        for (int i = 0; i < GameSettings.allyCount; i++) SpawnAlly();
+        for (int i = 0; i < GameSettings.enemyCount; i++) SpawnEnemy();
+        for (int i = 0; i < GameSettings.asteroidCount; i++) SpawnAsteroidNearPlayer();
+
+        cam.transform.position = PlayerShip.transform.position - Vector3.forward * 18f + Vector3.up * 6f;
         Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible   = false;
-        ClearAsteroids();
-        StartWave();
-    }
-
-    void StartWave()
-    {
-        wave++;
-        int count = baseAsteroids + (wave - 1) * 2;
-        Vector3 origin = player != null ? player.transform.position : Vector3.zero;
-        for (int i = 0; i < count; i++)
-        {
-            Vector3 pos; int tries = 0;
-            do { pos = origin + Random.onUnitSphere * spawnRadius; tries++; }
-            while (pos.magnitude < safeRadius && tries < 25);
-            SpawnAsteroid(pos, Asteroid.AsteroidSize.Large);
-        }
-    }
-
-    void SpawnPlayer(Vector3 pos)
-    {
-        if (player != null) Destroy(player.gameObject);
-
-        var go = new GameObject("Player");
-        go.tag = "Player";
-        var mf = go.AddComponent<MeshFilter>();
-        mf.mesh = MeshFactory.CreateShipMesh();
-        go.AddComponent<MeshRenderer>().material = LitMat(new Color(0.3f, 0.65f, 1f));
-
-        var rb = go.AddComponent<Rigidbody>();
-        rb.useGravity  = false;
-        rb.drag        = 0.5f;
-        rb.angularDrag = 3f;
-
-        // Convex MeshCollider matches the dart shape exactly
-        var col = go.AddComponent<MeshCollider>();
-        col.sharedMesh = mf.mesh;
-        col.convex     = true;
-
-        go.transform.position = pos;
-        player = go.AddComponent<PlayerShip>();
-    }
-
-    void Respawn()
-    {
-        SpawnPlayer(Vector3.zero);
-        player.BeginInvincible(3f);
+        Cursor.visible = false;
         state = State.Playing;
     }
 
-    // ── Asteroids ────────────────────────────────────────────────────────────
+    void ClearWorld()
+    {
+        foreach (var s in Ships) if (s != null) Destroy(s.gameObject);
+        Ships.Clear();
+        PlayerShip = null;
+        foreach (var a in asteroids) if (a != null) Destroy(a.gameObject);
+        asteroids.Clear();
+        foreach (var b in FindObjectsOfType<Bullet>()) Destroy(b.gameObject);
+    }
+
+    // ── Spawning ─────────────────────────────────────────────────────────────
+
+    Ship SpawnShip(ShipBlueprint bp, Faction f, Vector3 pos, Quaternion rot)
+    {
+        var go = new GameObject(f + "Ship");
+        go.transform.SetPositionAndRotation(pos, rot);
+        var ship = go.AddComponent<Ship>();
+        ship.Init(bp, f);
+        Ships.Add(ship);
+        return ship;
+    }
+
+    void SpawnEnemy()
+    {
+        if (PlayerShip == null) return;
+        Vector3 pos = PlayerShip.transform.position + Random.onUnitSphere * NPCSpawnRadius;
+        var s = SpawnShip(NPCBlueprint(), Faction.Enemy, pos,
+            Quaternion.LookRotation(PlayerShip.transform.position - pos));
+        s.gameObject.AddComponent<NPCController>();
+    }
+
+    void SpawnAlly()
+    {
+        if (PlayerShip == null) return;
+        Vector3 pos = PlayerShip.transform.position
+                    + PlayerShip.transform.right * Random.Range(-20f, 20f)
+                    + PlayerShip.transform.up * 8f - PlayerShip.transform.forward * 10f;
+        var s = SpawnShip(NPCBlueprint(), Faction.Ally, pos, PlayerShip.transform.rotation);
+        s.gameObject.AddComponent<NPCController>();
+    }
+
+    void SpawnAsteroidNearPlayer()
+    {
+        if (PlayerShip == null) return;
+        Vector3 pos;
+        int tries = 0;
+        do
+        {
+            pos = PlayerShip.transform.position + Random.onUnitSphere * Random.Range(50f, AsteroidSpawnRadius);
+            tries++;
+        } while (tries < 20 && (pos - PlayerShip.transform.position).magnitude < 40f);
+        SpawnAsteroid(pos, Asteroid.AsteroidSize.Large);
+    }
 
     public void SpawnAsteroid(Vector3 pos, Asteroid.AsteroidSize size)
     {
-        float radius = size == Asteroid.AsteroidSize.Large  ? 3.5f
+        float radius = size == Asteroid.AsteroidSize.Large ? 3.5f
                      : size == Asteroid.AsteroidSize.Medium ? 2.0f : 1.0f;
-        float speed  = size == Asteroid.AsteroidSize.Large  ? 4f
-                     : size == Asteroid.AsteroidSize.Medium ? 7f   : 11f;
+        float speed = GameSettings.asteroidSpeed *
+                      (size == Asteroid.AsteroidSize.Large ? 1f
+                     : size == Asteroid.AsteroidSize.Medium ? 1.6f : 2.4f);
 
         var go = new GameObject("Asteroid");
         var mf = go.AddComponent<MeshFilter>();
         mf.mesh = MeshFactory.CreateAsteroidMesh(Random.Range(0, 9999), radius);
-        go.AddComponent<MeshRenderer>().material = LitMat(new Color(0.55f, 0.45f, 0.35f));
+        go.AddComponent<MeshRenderer>().material =
+            FX.Standard(new Color(0.45f, 0.4f, 0.38f), Color.black, 0.1f, 0.35f);
 
         var rb = go.AddComponent<Rigidbody>();
-        rb.useGravity      = false;
-        rb.drag            = 0f;
-        rb.velocity        = Random.onUnitSphere * speed;
+        rb.useGravity = false;
+        rb.mass = radius * radius;
+        rb.velocity = Random.onUnitSphere * speed;
         rb.angularVelocity = Random.onUnitSphere * 1.5f;
 
-        // SphereCollider is cheaper than MeshCollider for asteroids
-        var col = go.AddComponent<SphereCollider>();
-        col.radius = radius * 0.85f;
+        go.AddComponent<SphereCollider>().radius = radius * 0.85f;
 
         go.transform.position = pos;
         var ast = go.AddComponent<Asteroid>();
@@ -153,12 +209,60 @@ public class GameManager : MonoBehaviour
         asteroids.Add(ast);
     }
 
-    public void OnAsteroidDestroyed(Asteroid ast)
+    // Keeps asteroid / NPC counts topped up to the settings, culls far strays.
+    void MaintainPopulation()
+    {
+        asteroids.RemoveAll(a => a == null);
+        Ships.RemoveAll(s => s == null);
+
+        asteroidTimer -= Time.deltaTime;
+        if (asteroids.Count < GameSettings.asteroidCount && asteroidTimer <= 0f)
+        {
+            SpawnAsteroidNearPlayer();
+            asteroidTimer = 1.2f;
+        }
+
+        enemyTimer -= Time.deltaTime;
+        if (CountFaction(Faction.Enemy) < GameSettings.enemyCount && enemyTimer <= 0f)
+        {
+            SpawnEnemy();
+            enemyTimer = 4f;
+        }
+
+        allyTimer -= Time.deltaTime;
+        if (CountFaction(Faction.Ally) < GameSettings.allyCount && allyTimer <= 0f)
+        {
+            SpawnAlly();
+            allyTimer = 12f;
+        }
+
+        if (PlayerShip != null)
+            foreach (var a in asteroids)
+                if (a != null &&
+                    (a.transform.position - PlayerShip.transform.position).magnitude > DespawnRadius)
+                {
+                    asteroids.Remove(a);
+                    Destroy(a.gameObject);
+                    break; // one per frame is plenty
+                }
+    }
+
+    int CountFaction(Faction f)
+    {
+        int n = 0;
+        foreach (var s in Ships) if (s != null && s.faction == f) n++;
+        return n;
+    }
+
+    // ── Score / events ───────────────────────────────────────────────────────
+
+    public void OnAsteroidDestroyed(Asteroid ast, bool scored)
     {
         if (!asteroids.Remove(ast)) return;
 
-        score += ast.Size == Asteroid.AsteroidSize.Large  ? 100
-               : ast.Size == Asteroid.AsteroidSize.Medium ? 50 : 25;
+        if (scored)
+            score += ast.Size == Asteroid.AsteroidSize.Large ? 100
+                   : ast.Size == Asteroid.AsteroidSize.Medium ? 50 : 25;
 
         Vector3 p = ast.transform.position;
         if (ast.Size == Asteroid.AsteroidSize.Large)
@@ -173,78 +277,107 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    public void OnPlayerHit()
+    public void OnShipDestroyed(Ship ship)
     {
-        if (state != State.Playing) return;
-        lives--;
-        Destroy(player.gameObject);
-        if (lives <= 0)
+        Ships.Remove(ship);
+        if (ship.faction == Faction.Enemy) score += 500;
+        if (ship == PlayerShip)
         {
-            state = State.GameOver;
+            PlayerShip = null;
+            CameraShake(2f);
             Cursor.lockState = CursorLockMode.None;
-            Cursor.visible   = true;
-        }
-        else
-        {
-            state     = State.Dead;
-            deadTimer = 2.5f;
+            Cursor.visible = true;
+            state = State.GameOver;
         }
     }
 
-    void ClearAsteroids()
-    {
-        foreach (var a in asteroids) if (a != null) Destroy(a.gameObject);
-        asteroids.Clear();
-    }
+    public void CameraShake(float amount) => shake = Mathf.Max(shake, amount);
 
     // ── Camera ───────────────────────────────────────────────────────────────
 
-    void SetupCamera()
-    {
-        cam = Camera.main;
-        if (cam == null)
-        {
-            var g = new GameObject("Main Camera"); g.tag = "MainCamera";
-            cam = g.AddComponent<Camera>();
-            g.AddComponent<AudioListener>();
-        }
-        cam.clearFlags       = CameraClearFlags.SolidColor;
-        cam.backgroundColor  = new Color(0.02f, 0.02f, 0.07f);
-        cam.farClipPlane     = 800f;
-    }
-
     void FollowCamera()
     {
-        if (player == null || cam == null) return;
-        Vector3 target = player.transform.position
-                       - player.transform.forward * 14f
-                       + player.transform.up      *  4f;
-        cam.transform.position = Vector3.Lerp(cam.transform.position, target, Time.deltaTime * 6f);
-        cam.transform.LookAt(player.transform.position + player.transform.forward * 4f, player.transform.up);
+        if (PlayerShip == null) return;
+        var t = PlayerShip.transform;
+        Vector3 target = t.position - t.forward * 16f + t.up * 5f;
+        cam.transform.position = Vector3.Lerp(cam.transform.position, target, Time.deltaTime * 5f);
+
+        shake = Mathf.Lerp(shake, 0f, Time.deltaTime * 4f);
+        cam.transform.position += Random.insideUnitSphere * shake * 0.4f;
+        cam.transform.LookAt(t.position + t.forward * 6f, t.up);
+
+        // FOV kick while boosting sells the speed.
+        float targetFov = PlayerShip.Boost && Mathf.Abs(PlayerShip.ThrustInput) > 0.1f ? 72f : 60f;
+        fov = Mathf.Lerp(fov, targetFov, Time.deltaTime * 5f);
+        cam.fieldOfView = fov;
     }
 
-    // ── Utilities ────────────────────────────────────────────────────────────
+    // ── Blueprints ───────────────────────────────────────────────────────────
 
-    static Material LitMat(Color c)
+    static ShipBlueprint DefaultPlayerBlueprint()
     {
-        var m = new Material(Shader.Find("Standard")); m.color = c; return m;
+        var bp = new ShipBlueprint();
+        bp.TryAdd(new Vector3Int(0, 0, 1),  BlockType.Hull);
+        bp.TryAdd(new Vector3Int(0, 0, 2),  BlockType.Gun);
+        bp.TryAdd(new Vector3Int(-1, 0, 0), BlockType.Hull);
+        bp.TryAdd(new Vector3Int(1, 0, 0),  BlockType.Hull);
+        bp.TryAdd(new Vector3Int(-1, 0, -1), BlockType.Thruster);
+        bp.TryAdd(new Vector3Int(1, 0, -1), BlockType.Thruster);
+        bp.TryAdd(new Vector3Int(0, 1, 0),  BlockType.Steering);
+        bp.TryAdd(new Vector3Int(0, -1, 0), BlockType.Steering);
+        return bp;
+    }
+
+    static ShipBlueprint NPCBlueprint()
+    {
+        var bp = new ShipBlueprint();
+        bp.TryAdd(new Vector3Int(0, 0, 1),  BlockType.Hull);
+        bp.TryAdd(new Vector3Int(0, 0, 2),  BlockType.Gun);
+        bp.TryAdd(new Vector3Int(-1, 0, 0), BlockType.Hull);
+        bp.TryAdd(new Vector3Int(1, 0, 0),  BlockType.Hull);
+        bp.TryAdd(new Vector3Int(-1, 0, -1), BlockType.Thruster);
+        bp.TryAdd(new Vector3Int(1, 0, -1), BlockType.Thruster);
+        bp.TryAdd(new Vector3Int(0, 1, 0),  BlockType.Steering);
+        bp.TryAdd(new Vector3Int(0, -1, 0), BlockType.Steering);
+        if (Random.value > 0.5f)
+        {
+            bp.TryAdd(new Vector3Int(-1, 0, 1), BlockType.Gun);
+            bp.TryAdd(new Vector3Int(1, 0, 1),  BlockType.Gun);
+        }
+        return bp;
     }
 
     // ── HUD ──────────────────────────────────────────────────────────────────
 
+    GUIStyle sTitle, sMed, sSmall, sBtn;
+    Texture2D boxTex;
+    bool stylesBuilt;
+    float titlePulse;
+
     void BuildStyles()
     {
-        if (stylesBuilt) return; stylesBuilt = true;
+        if (stylesBuilt) return;
+        stylesBuilt = true;
 
-        sTitle = new GUIStyle(GUI.skin.label) { fontSize = 54, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        sTitle.normal.textColor = Color.white;
+        boxTex = new Texture2D(1, 1);
+        boxTex.SetPixel(0, 0, new Color(0.03f, 0.08f, 0.12f, 0.82f));
+        boxTex.Apply();
 
-        sMed = new GUIStyle(GUI.skin.label) { fontSize = 26, alignment = TextAnchor.MiddleCenter };
+        Color cyan = new Color(0.45f, 0.95f, 1f);
+
+        sTitle = new GUIStyle(GUI.skin.label) { fontSize = 52, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        sTitle.normal.textColor = cyan;
+
+        sMed = new GUIStyle(GUI.skin.label) { fontSize = 24, alignment = TextAnchor.MiddleCenter };
         sMed.normal.textColor = Color.white;
 
-        sSmall = new GUIStyle(GUI.skin.label) { fontSize = 18, alignment = TextAnchor.UpperLeft };
-        sSmall.normal.textColor = new Color(1f, 1f, 1f, 0.9f);
+        sSmall = new GUIStyle(GUI.skin.label) { fontSize = 17, alignment = TextAnchor.UpperLeft };
+        sSmall.normal.textColor = cyan;
+
+        sBtn = new GUIStyle(GUI.skin.button) { fontSize = 22 };
     }
+
+    void Panel(Rect r) => GUI.DrawTexture(r, boxTex);
 
     void OnGUI()
     {
@@ -253,57 +386,141 @@ public class GameManager : MonoBehaviour
 
         switch (state)
         {
-            case State.Menu:
-                GUI.Label(new Rect(sw/2-300, sh/2-120, 600, 80), "STARSHIP CRAFT", sTitle);
-                sTitle.fontSize = 26; sTitle.normal.textColor = Color.yellow;
-                GUI.Label(new Rect(sw/2-250, sh/2-30, 500, 50), "Press any key to play", sTitle);
-                sTitle.fontSize = 54; sTitle.normal.textColor = Color.white;
-                sMed.normal.textColor = new Color(1f,1f,1f,0.65f);
-                GUI.Label(new Rect(sw/2-300, sh/2+35, 600, 70),
-                    "WASD — Thrust / Strafe     Mouse — Aim     Q / E — Roll\n" +
-                    "Space / LMB — Fire     X — Brake     Shift — Boost", sMed);
-                sMed.normal.textColor = Color.white;
-                break;
-
-            case State.Playing:
-            case State.Dead:
-                GUI.Label(new Rect(12, 10, 200, 28), $"SCORE   {score}", sSmall);
-                GUI.Label(new Rect(12, 36, 200, 28), $"WAVE    {wave}",  sSmall);
-                DrawLives(sw);
-                DrawCrosshair(sw, sh);
-                if (state == State.Dead)
-                {
-                    sMed.normal.textColor = new Color(1f, 0.65f, 0.2f);
-                    GUI.Label(new Rect(sw/2-220, sh/2-30, 440, 60),
-                        $"Respawning in {Mathf.CeilToInt(deadTimer)}...", sMed);
-                    sMed.normal.textColor = Color.white;
-                }
-                break;
-
-            case State.GameOver:
-                sTitle.normal.textColor = Color.red;
-                GUI.Label(new Rect(sw/2-300, sh/2-110, 600, 80), "GAME OVER", sTitle);
-                sTitle.normal.textColor = Color.white;
-                GUI.Label(new Rect(sw/2-220, sh/2-20,  440, 50), $"Final Score: {score}", sMed);
-                GUI.Label(new Rect(sw/2-160, sh/2+40,  320, 40), "Press R to restart",    sMed);
-                break;
+            case State.Menu:     GuiMenu(sw, sh); break;
+            case State.Settings: GuiSettings(sw, sh); break;
+            case State.Build:    GuiBuild(sw, sh); break;
+            case State.Playing:  GuiPlaying(sw, sh); break;
+            case State.GameOver: GuiGameOver(sw, sh); break;
         }
     }
 
-    void DrawLives(float sw)
+    void GuiMenu(float sw, float sh)
     {
-        string h = ""; for (int i = 0; i < lives; i++) h += "♥ ";
-        sSmall.alignment = TextAnchor.UpperRight;
-        GUI.Label(new Rect(sw - 160f, 10f, 150f, 28f), h, sSmall);
-        sSmall.alignment = TextAnchor.UpperLeft;
+        titlePulse += Time.deltaTime;
+        sTitle.normal.textColor = Color.Lerp(new Color(0.45f, 0.95f, 1f),
+            new Color(0.8f, 0.5f, 1f), 0.5f + 0.5f * Mathf.Sin(titlePulse * 1.4f));
+
+        Panel(new Rect(sw / 2 - 320, sh / 2 - 190, 640, 380));
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 170, 600, 80), "STARSHIP CRAFT", sTitle);
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 90, 600, 40),
+            "Build a block ship. Balance your engines. Survive the belt.", sMed);
+
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 - 10, 220, 52), "BUILD SHIP", sBtn)) EnterBuild();
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 55, 220, 52), "SETTINGS", sBtn)) state = State.Settings;
     }
 
-    void DrawCrosshair(float sw, float sh)
+    void GuiSettings(float sw, float sh)
     {
-        float cx = sw/2f, cy = sh/2f, s = 10f, t = 2f;
-        GUI.color = new Color(1f, 1f, 1f, 0.75f);
-        GUI.DrawTexture(new Rect(cx-s,   cy-t/2, s*2, t),   Texture2D.whiteTexture);
-        GUI.DrawTexture(new Rect(cx-t/2, cy-s,   t,   s*2), Texture2D.whiteTexture);
+        Panel(new Rect(sw / 2 - 320, sh / 2 - 230, 640, 470));
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 215, 600, 50), "DIFFICULTY", sTitle);
+
+        float y = sh / 2 - 140;
+        GameSettings.asteroidCount = SliderRow(sw, ref y, "Asteroids", GameSettings.asteroidCount, 0, 30);
+        GameSettings.asteroidSpeed = SliderRowF(sw, ref y, "Asteroid speed", GameSettings.asteroidSpeed, 1f, 20f);
+        GameSettings.enemyCount    = SliderRow(sw, ref y, "Enemy ships", GameSettings.enemyCount, 0, 8);
+        GameSettings.allyCount     = SliderRow(sw, ref y, "Allied ships", GameSettings.allyCount, 0, 4);
+        GameSettings.npcSkill      = SliderRowF(sw, ref y, "NPC speed / skill", GameSettings.npcSkill, 0.5f, 2f);
+
+        y += 14;
+        if (GUI.Button(new Rect(sw / 2 - 280, y, 170, 40), "EASY", sBtn))   GameSettings.ApplyEasy();
+        if (GUI.Button(new Rect(sw / 2 - 85,  y, 170, 40), "NORMAL", sBtn)) GameSettings.ApplyNormal();
+        if (GUI.Button(new Rect(sw / 2 + 110, y, 170, 40), "HARD", sBtn))   GameSettings.ApplyHard();
+
+        if (GUI.Button(new Rect(sw / 2 - 85, y + 55, 170, 44), "BACK", sBtn)) state = State.Menu;
+    }
+
+    int SliderRow(float sw, ref float y, string label, int val, int min, int max)
+        => Mathf.RoundToInt(SliderRowF(sw, ref y, label, val, min, max));
+
+    float SliderRowF(float sw, ref float y, string label, float val, float min, float max)
+    {
+        GUI.Label(new Rect(sw / 2 - 280, y, 240, 26), label, sSmall);
+        float v = GUI.HorizontalSlider(new Rect(sw / 2 - 20, y + 7, 240, 20), val, min, max);
+        GUI.Label(new Rect(sw / 2 + 235, y, 60, 26), v.ToString("0.#"), sSmall);
+        y += 42;
+        return v;
+    }
+
+    void GuiBuild(float sw, float sh)
+    {
+        Panel(new Rect(10, 10, 340, 236));
+        GUI.Label(new Rect(22, 16, 300, 30), "SHIPYARD", sSmall);
+        string[] names =
+        {
+            "1  Hull", "2  Thruster (engine)", "3  RCS (turning jets)", "4  Gun",
+        };
+        string[] descs =
+        {
+            "Armor and structure. Cheap mass.",
+            "Pushes forward from where it sits —\nmount engines around the center line.",
+            "Turns the ship. Stronger mounted\nfar from the center of mass.",
+            "Forward-firing cannon. More guns,\nfaster combined fire rate.",
+        };
+        BlockType[] types = { BlockType.Hull, BlockType.Thruster, BlockType.Steering, BlockType.Gun };
+        int selIdx = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            bool sel = builder != null && builder.Selected == types[i];
+            if (sel) selIdx = i;
+            sSmall.normal.textColor = sel ? Color.white : new Color(0.45f, 0.95f, 1f, 0.75f);
+            GUI.Label(new Rect(22, 44 + i * 24, 300, 24), (sel ? "▶ " : "   ") + names[i], sSmall);
+        }
+        sSmall.normal.textColor = new Color(0.8f, 0.9f, 1f, 0.9f);
+        GUI.Label(new Rect(22, 142, 310, 44), descs[selIdx], sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        GUI.Label(new Rect(22, 190, 300, 48),
+            "LMB place  ·  RMB remove\nWASD orbit  ·  Scroll zoom", sSmall);
+
+        Panel(new Rect(10, sh - 96, 460, 86));
+        GUI.Label(new Rect(22, sh - 88, 440, 26),
+            $"Blocks {blueprint.Blocks.Count}   Thrusters {blueprint.Count(BlockType.Thruster)}   " +
+            $"RCS {blueprint.Count(BlockType.Steering)}   Guns {blueprint.Count(BlockType.Gun)}", sSmall);
+        sSmall.normal.textColor = ReadyToLaunch() ? new Color(0.4f, 1f, 0.6f) : new Color(1f, 0.6f, 0.3f);
+        GUI.Label(new Rect(22, sh - 60, 440, 26),
+            ReadyToLaunch() ? "Press ENTER to launch"
+                            : "Add at least one Thruster to launch", sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        GUI.Label(new Rect(22, sh - 36, 440, 24),
+            "Tip: keep thrust symmetric around the center of mass", sSmall);
+    }
+
+    void GuiPlaying(float sw, float sh)
+    {
+        Panel(new Rect(10, 10, 240, 92));
+        GUI.Label(new Rect(22, 16, 220, 26), $"SCORE   {score}", sSmall);
+        GUI.Label(new Rect(22, 40, 220, 26), $"TIME    {playTime:0}s", sSmall);
+        GUI.Label(new Rect(22, 64, 220, 26),
+            $"BLOCKS  {(PlayerShip != null ? PlayerShip.BlockCount : 0)}", sSmall);
+
+        Panel(new Rect(sw - 250, 10, 240, 68));
+        sSmall.alignment = TextAnchor.UpperRight;
+        GUI.Label(new Rect(sw - 262, 16, 240, 26), $"HOSTILES  {CountFaction(Faction.Enemy)}", sSmall);
+        sSmall.normal.textColor = new Color(0.4f, 1f, 0.6f);
+        GUI.Label(new Rect(sw - 262, 40, 240, 26), $"ALLIES  {CountFaction(Faction.Ally)}", sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        sSmall.alignment = TextAnchor.UpperLeft;
+
+        // Crosshair
+        float cx = sw / 2f, cy = sh / 2f;
+        GUI.color = new Color(0.45f, 0.95f, 1f, 0.8f);
+        GUI.DrawTexture(new Rect(cx - 12, cy - 1, 8, 2), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(cx + 4,  cy - 1, 8, 2), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(cx - 1, cy - 12, 2, 8), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(cx - 1, cy + 4,  2, 8), Texture2D.whiteTexture);
         GUI.color = Color.white;
+    }
+
+    void GuiGameOver(float sw, float sh)
+    {
+        Panel(new Rect(sw / 2 - 300, sh / 2 - 140, 600, 280));
+        sTitle.normal.textColor = new Color(1f, 0.35f, 0.3f);
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 120, 600, 70), "SHIP DESTROYED", sTitle);
+        sTitle.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 40, 600, 40),
+            $"Score {score}   ·   Survived {playTime:0}s", sMed);
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 + 10, 600, 40),
+            "Your blueprint is saved — refit and fly again", sMed);
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 65, 220, 50), "REBUILD  (R)", sBtn))
+            EnterBuild();
     }
 }
