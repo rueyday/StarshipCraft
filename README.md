@@ -67,10 +67,17 @@ it will wallow like a brick.
 |---|---|
 | W / S | Throttle forward / reverse (reverse at half power) |
 | Mouse | Pitch and yaw |
+| A / D | Turn left / right (yaw, same as mouse) |
 | Q / E | Roll |
+| G | Anchor lock — the ship freezes dead still against gravity, impacts, everything; guns still fire (turret mode) |
+| F | Armor mode — while raised, every hit is soaked by your nearest Armor block; the shield holds until your plating is shot away |
 | Left Shift | Boost (with a camera FOV kick) |
 | X | Brake |
 | Space or LMB | Fire |
+| T | Turbo — huge straight-line speed for travel; drains the engine heat bar (Mk II engines last much longer), guns offline until 1 s after dropping out |
+| E | Refit at the carrier (land slowly on the glowing pad first) |
+| 1 / 2 / 3 | Camera: chase / rear view / free spectator cam (free cam flies with WASD + mouse while the ship drifts) |
+| M (or click the radar) | 3D system map — the camera orbits the real world from afar with labeled bodies; drag to orbit, scroll to zoom |
 | H | Toggle the controls help panel |
 | R | Respawn via the shipyard — only offered while stranded (all engines gone) |
 
@@ -108,24 +115,42 @@ your blocks:
 
 ---
 
-## The Planet
+## The Star System — one continuous world
 
-A giant procedural planet (350 m radius) looms 1.2 km from the shipyard — blue
-blip on the radar. It is a real physical place, not a backdrop:
+No maps, no loading screens: everywhere is just coordinates. You launch from
+the **carrier** and fly wherever the radar blips point. Gravity uses the
+**cloud-layer model**: constant gravity below each world's cloud deck, fading
+linearly to zero inside the clouds, pure zero-g above them — space battles
+stay clean, and punching up through a cloud deck is how you feel the ship go
+weightless.
 
-- **Gravity well** — inverse-square gravity (16 m/s² at the surface) grips
-  everything inside 3 planet radii: your ship, NPCs, even loose asteroids.
-  Mass cancels out of free-fall, but not out of climbing: a heavy ship with
-  weak engines can descend and *never make it back out*. Bring thrust.
-- **Landing & crashing** — touch down under ~14 m/s and you just kick up dust;
-  you can settle onto the terrain, slide along it, and take off again. Hit
-  harder and the impact smashes a block off (two blocks past 30 m/s). Mountains
-  are real collision geometry poking out of a glossy ocean, under a hazy
-  atmosphere shell.
-- **The belt** — a tilted ring of ~70 large rocks slowly orbits the planet
-  amid sparkling ring dust. Gentle nudges (under 6 m/s) bounce off harmlessly,
-  so a careful pilot can thread the ring; ramming one at speed costs a block.
-  Belt rocks can be shot, but score nothing — they're scenery with teeth.
+- **The Carrier** (cyan blip, your spawn) — a landable flight deck with glowing
+  runway strips. Settle onto the marked pad under 6 m/s and press **E** to
+  refit in the shipyard without leaving the world; launches and stranded
+  respawns return you to the deck.
+Each world's sky is its own scene, No Man's Sky-style: cross the cloud top
+and the weather takes over, thickening all the way down to the surface.
+
+- **Korrath** (blue blip) — a 1.4 km rocky world with mountains, oceans and a
+  tilted orbital belt of ~70 rocks amid ring dust (gentle bumps under 6 m/s
+  bounce harmlessly). Enter its sky and you're **flying through cloud banks**:
+  soft white fog and huge drifting puffs. Land under ~14 m/s for dust, not
+  damage; harder impacts smash blocks (two past 30 m/s).
+- **Vessa** (blue blip) — a 650 m ice world. Its sky is a **snow storm**:
+  pale-blue fog and flakes streaming down toward the surface.
+- **Titanhold** (orange blip) — the Saturn of the system: the flat play region
+  rides the top cap of a **30 km butterscotch globe**. Its entire sky is a
+  **giant dust storm** — sand-gold fog and wind-blown grit from the cloud top
+  all the way to the wind-scoured ground. Wrapping the globe below the play
+  cap — with a proper Saturn gap off its flank — races a **four-band golden
+  ring** (16.5–21 km out), spinning with embedded debris streaming past at
+  over 2 km/s. Beautiful from any distance, lethal inside: anything in the
+  band loses a block roughly twice a second.
+
+**Turbo** covers the distances: hold T for ~220 m/s straight-line flight. It
+drains a heat pool fed by your engines (Mk I ≈ 4 s each, Mk II ≈ 10 s each,
+regenerating at half rate), turns go wide, and weapons stay offline until a
+second after you drop out — no turbo-sniping.
 
 ## Enemies, Allies, Asteroids
 
@@ -182,7 +207,10 @@ All scripts live in `Assets/Script/`.
 | `PlayerController.cs` | Input → Ship |
 | `NPCController.cs` | Friend/foe dogfight AI → Ship |
 | `Bullet.cs` | Faction-aware energy bolt with trail |
-| `Planet.cs` | The planet: gravity well, terrain/ocean/atmosphere, orbiting belt ring |
+| `GravityField.cs` | Cloud-layer gravity: constant below clouds, fades in-band, zero above |
+| `Planet.cs` | Round planets: terrain/ocean/atmosphere/cloud shell, orbiting belt ring |
+| `Supergiant.cs` | The flat super-giant: streamed canyon/pillar chunks, cloud decks |
+| `Carrier.cs` | The carrier: landable deck, refit pad, spawn point |
 | `Asteroid.cs` | Split/score notifications, planet gravity, ram damage with a gentle-bump threshold |
 | `MeshFactory.cs` | Procedural meshes: hard-edged cube, combined hull mesh for the convex collider, Perlin-displaced icosphere asteroids |
 | `FX.cs` | All effects: materials, engine flames, explosions, debris, starfield, fading lights |

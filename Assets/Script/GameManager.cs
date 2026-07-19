@@ -52,7 +52,7 @@ public class GameManager : MonoBehaviour
         }
         cam.clearFlags      = CameraClearFlags.SolidColor;
         cam.backgroundColor = new Color(0.01f, 0.015f, 0.045f);
-        cam.farClipPlane    = 5000f; // the planet must stay visible from afar
+        cam.farClipPlane    = 34000f; // planets + Titanhold's full ring stay visible
 
         RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
         RenderSettings.ambientLight = new Color(0.18f, 0.2f, 0.28f);
@@ -67,10 +67,21 @@ public class GameManager : MonoBehaviour
         starfieldRoot = new GameObject("StarfieldRoot").transform;
         FX.Starfield(starfieldRoot);
 
-        // The looming planet: fly down its gravity well to the surface, thread
-        // the orbiting belt — or crash trying. Big and close enough to fill
-        // half the sky, but its pull at spawn is a negligible drift.
-        Planet.Create(new Vector3(0f, -600f, 1500f), 700f);
+        // One continuous star system — everywhere is just coordinates.
+        GravityField.Clear();
+        Carrier.Create(Vector3.zero);
+        Planet.Create(new Vector3(0f, -1400f, 3400f), 1400f, 1234,
+            new Color(0.4f, 0.34f, 0.26f), new Color(0.08f, 0.28f, 0.5f), true,
+            WeatherKind.Cloud, "Korrath");
+        Planet.Create(new Vector3(-5200f, 900f, -3800f), 650f, 555,
+            new Color(0.75f, 0.8f, 0.85f), new Color(0.5f, 0.65f, 0.8f), false,
+            WeatherKind.Snow, "Vessa");
+        Supergiant.Create(new Vector3(11500f, -300f, 1500f), 6000f, "Titanhold");
+        new GameObject("Weather").AddComponent<Weather>();
+
+        mapCenter = Vector3.zero;
+        foreach (var src in GravityField.Sources) mapCenter += src.center;
+        mapCenter /= Mathf.Max(1, GravityField.Sources.Count + 1); // + carrier at origin
 
         blueprint = DefaultPlayerBlueprint();
     }
@@ -92,9 +103,19 @@ public class GameManager : MonoBehaviour
             case State.Playing:
                 playTime += Time.deltaTime;
                 if (Input.GetKeyDown(KeyCode.H)) showHelp = !showHelp;
+                if (Input.GetKeyDown(KeyCode.M)) ToggleMap();
+                if (!mapView)
+                {
+                    if (Input.GetKeyDown(KeyCode.Alpha1)) camMode = 1;
+                    if (Input.GetKeyDown(KeyCode.Alpha2)) camMode = 2;
+                    if (Input.GetKeyDown(KeyCode.Alpha3)) camMode = 3;
+                }
                 if (PlayerStranded && Input.GetKeyDown(KeyCode.R)) EnterBuild(false);
+                if (Carrier.Instance != null && Carrier.Instance.CanRefit(PlayerShip) &&
+                    Input.GetKeyDown(KeyCode.E)) EnterBuild(false);
                 MaintainPopulation();
-                FollowCamera();
+                if (mapView) MapCamera();
+                else FollowCamera();
                 break;
         }
     }
@@ -123,7 +144,8 @@ public class GameManager : MonoBehaviour
         Destroy(builder.gameObject);
         builder = null;
 
-        PlayerShip = SpawnShip(blueprint, Faction.Player, Vector3.zero, Quaternion.identity);
+        Vector3 spawn = Carrier.Instance != null ? Carrier.Instance.RespawnPoint : Vector3.zero;
+        PlayerShip = SpawnShip(blueprint, Faction.Player, spawn, Quaternion.identity);
         PlayerShip.gameObject.AddComponent<PlayerController>();
 
         for (int i = 0; i < GameSettings.allyCount; i++) SpawnAlly();
@@ -224,8 +246,12 @@ public class GameManager : MonoBehaviour
         asteroids.RemoveAll(a => a == null);
         Ships.RemoveAll(s => s == null);
 
+        // No asteroid rain under a gravity field — canyon flying stays clean.
+        bool inGravity = PlayerShip != null &&
+            GravityField.Sample(PlayerShip.transform.position).sqrMagnitude > 0.01f;
+
         asteroidTimer -= Time.deltaTime;
-        if (asteroids.Count < GameSettings.asteroidCount && asteroidTimer <= 0f)
+        if (!inGravity && asteroids.Count < GameSettings.asteroidCount && asteroidTimer <= 0f)
         {
             SpawnAsteroidNearPlayer();
             asteroidTimer = 1.2f;
@@ -303,18 +329,61 @@ public class GameManager : MonoBehaviour
     void FollowCamera()
     {
         if (PlayerShip == null) return;
+        if (camMode == 3) { FreeCamera(); return; }
+
         var t = PlayerShip.transform;
-        Vector3 target = t.position - t.forward * 16f + t.up * 5f;
+        bool rear = camMode == 2;
+        Vector3 target = t.position + t.forward * (rear ? 16f : -16f) + t.up * 5f;
         cam.transform.position = Vector3.Lerp(cam.transform.position, target, Time.deltaTime * 5f);
 
         shake = Mathf.Lerp(shake, 0f, Time.deltaTime * 4f);
         cam.transform.position += Random.insideUnitSphere * shake * 0.4f;
-        cam.transform.LookAt(t.position + t.forward * 6f, t.up);
+        cam.transform.LookAt(t.position + t.forward * (rear ? -6f : 6f), t.up);
 
-        // FOV kick while boosting sells the speed.
-        float targetFov = PlayerShip.Boost && Mathf.Abs(PlayerShip.ThrustInput) > 0.1f ? 72f : 60f;
+        // FOV kick while boosting sells the speed; turbo stretches it further.
+        float targetFov = PlayerShip.TurboActive ? 84f
+            : PlayerShip.Boost && Mathf.Abs(PlayerShip.ThrustInput) > 0.1f ? 72f : 60f;
         fov = Mathf.Lerp(fov, targetFov, Time.deltaTime * 5f);
         cam.fieldOfView = fov;
+    }
+
+    // Spectator cam: mouse looks, WASD flies, Q/E down/up, Shift is fast.
+    // The ship drifts untouched while you frame the shot.
+    void FreeCamera()
+    {
+        var e = cam.transform.eulerAngles;
+        float pitch = e.x > 180f ? e.x - 360f : e.x;
+        pitch = Mathf.Clamp(pitch - Input.GetAxis("Mouse Y") * 2f, -89f, 89f);
+        cam.transform.rotation = Quaternion.Euler(pitch, e.y + Input.GetAxis("Mouse X") * 2f, 0f);
+
+        Vector3 move = cam.transform.rotation * new Vector3(
+            Input.GetAxis("Horizontal"), 0f, Input.GetAxis("Vertical"));
+        move.y += (Input.GetKey(KeyCode.E) ? 1f : 0f) - (Input.GetKey(KeyCode.Q) ? 1f : 0f);
+        float speed = Input.GetKey(KeyCode.LeftShift) ? 200f : 50f;
+        cam.transform.position += move * speed * Time.deltaTime;
+        cam.fieldOfView = 60f;
+    }
+
+    void ToggleMap()
+    {
+        mapView = !mapView;
+        Cursor.lockState = mapView ? CursorLockMode.None : CursorLockMode.Locked;
+        Cursor.visible = mapView;
+    }
+
+    // Orbit the real scene from high above — the world is its own map.
+    void MapCamera()
+    {
+        if (Input.GetMouseButton(0))
+        {
+            mapYaw += Input.GetAxis("Mouse X") * 3f;
+            mapPitch = Mathf.Clamp(mapPitch - Input.GetAxis("Mouse Y") * 3f, 10f, 85f);
+        }
+        mapDist = Mathf.Clamp(mapDist - Input.GetAxis("Mouse ScrollWheel") * 4000f, 2500f, 30000f);
+        var rot = Quaternion.Euler(mapPitch, mapYaw, 0f);
+        cam.transform.position = mapCenter + rot * new Vector3(0f, 0f, -mapDist);
+        cam.transform.rotation = rot;
+        cam.fieldOfView = 60f;
     }
 
     // ── Blueprints ───────────────────────────────────────────────────────────
@@ -361,6 +430,18 @@ public class GameManager : MonoBehaviour
     bool stylesBuilt;
     bool showHelp;
     float titlePulse;
+    Rect radarRect;
+
+    // Camera modes: 1 chase, 2 rear view, 3 free spectator cam.
+    int camMode = 1;
+
+    // 3D system map (M or click the radar): orbits the real scene from afar.
+    bool mapView;
+    float mapYaw = 30f, mapPitch = 55f, mapDist = 9000f;
+    Vector3 mapCenter;
+
+    // Free cam and the map both steal WASD/mouse from the ship.
+    public bool ShipInputSuspended => mapView || camMode == 3;
 
     void BuildStyles()
     {
@@ -384,7 +465,7 @@ public class GameManager : MonoBehaviour
 
         sBtn = new GUIStyle(GUI.skin.button) { fontSize = 22 };
 
-        radarTex = MakeRadarTex(160);
+        radarTex = MakeRadarTex(256);
     }
 
     void Panel(Rect r) => GUI.DrawTexture(r, boxTex);
@@ -414,8 +495,11 @@ public class GameManager : MonoBehaviour
         GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 95, 600, 75),
             "Build a block ship. Balance your engines. Survive the belt.", sMed);
 
-        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 - 10, 220, 52), "BUILD SHIP", sBtn)) EnterBuild(true);
-        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 55, 220, 52), "SETTINGS", sBtn)) state = State.Settings;
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 - 25, 220, 48), "SINGLE PLAYER", sBtn)) EnterBuild(true);
+        GUI.enabled = false;
+        GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 32, 220, 48), "MULTIPLAYER — SOON", sBtn);
+        GUI.enabled = true;
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 89, 220, 48), "SETTINGS", sBtn)) state = State.Settings;
     }
 
     void GuiSettings(float sw, float sh)
@@ -501,11 +585,22 @@ public class GameManager : MonoBehaviour
 
     void GuiPlaying(float sw, float sh)
     {
-        Panel(new Rect(10, 10, 240, 92));
+        if (mapView) { GuiMap(sw, sh); return; }
+
+        Panel(new Rect(10, 10, 240, 118));
         GUI.Label(new Rect(22, 16, 220, 26), $"SCORE   {score}", sSmall);
         GUI.Label(new Rect(22, 40, 220, 26), $"TIME    {playTime:0}s", sSmall);
         GUI.Label(new Rect(22, 64, 220, 26),
             $"BLOCKS  {(PlayerShip != null ? PlayerShip.BlockCount : 0)}", sSmall);
+        if (PlayerShip != null && (PlayerShip.Anchored || PlayerShip.ArmorMode))
+        {
+            sSmall.normal.textColor = PlayerShip.Anchored
+                ? new Color(1f, 0.7f, 0.25f) : new Color(0.4f, 1f, 0.6f);
+            GUI.Label(new Rect(22, 90, 220, 26),
+                (PlayerShip.Anchored ? "ANCHORED (G)  " : "") +
+                (PlayerShip.ArmorMode ? "ARMOR UP (F)" : ""), sSmall);
+            sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        }
 
         Panel(new Rect(sw - 250, 10, 240, 68));
         sSmall.alignment = TextAnchor.UpperRight;
@@ -524,9 +619,35 @@ public class GameManager : MonoBehaviour
         GUI.DrawTexture(new Rect(cx - 1, cy + 4,  2, 8), Texture2D.whiteTexture);
         GUI.color = Color.white;
 
+        DrawTurboBar(sw, sh);
+        if (Carrier.Instance != null && Carrier.Instance.CanRefit(PlayerShip))
+        {
+            sMed.normal.textColor = new Color(0.3f, 0.9f, 1f);
+            GUI.Label(new Rect(sw / 2 - 200, sh / 2 + 60, 400, 36), "E  —  refit at the hangar", sMed);
+            sMed.normal.textColor = Color.white;
+        }
+
         DrawRadar(sw, sh);
         DrawHelp(sh);
         if (PlayerStranded) GuiStranded(sw, sh);
+    }
+
+    // Turbo heat pool — drained by turbo, refilled while cruising.
+    void DrawTurboBar(float sw, float sh)
+    {
+        if (PlayerShip == null) return;
+        float w = 220f, h = 10f, x = sw / 2f - w / 2f, y = sh - 34f;
+        GUI.color = new Color(0f, 0f, 0f, 0.55f);
+        GUI.DrawTexture(new Rect(x - 2, y - 2, w + 4, h + 4), Texture2D.whiteTexture);
+        float f = PlayerShip.Heat01;
+        GUI.color = PlayerShip.TurboActive ? new Color(1f, 0.55f, 0.15f)
+                  : Color.Lerp(new Color(1f, 0.4f, 0.3f), new Color(0.35f, 0.9f, 1f), f);
+        GUI.DrawTexture(new Rect(x, y, w * f, h), Texture2D.whiteTexture);
+        GUI.color = Color.white;
+        sSmall.alignment = TextAnchor.UpperCenter;
+        GUI.Label(new Rect(x, y - 24, w, 22),
+            PlayerShip.TurboActive ? "TURBO" : "TURBO (T)", sSmall);
+        sSmall.alignment = TextAnchor.UpperLeft;
     }
 
     // ── Radar ────────────────────────────────────────────────────────────────
@@ -536,35 +657,50 @@ public class GameManager : MonoBehaviour
     void DrawRadar(float sw, float sh)
     {
         if (PlayerShip == null) return;
-        const float R = 82f, range = 260f;
-        Vector2 c = new Vector2(sw - 112f, sh - 112f);
+        const float R = 112f, range = 260f;
+        Vector2 c = new Vector2(sw - 142f, sh - 142f);
 
-        GUI.DrawTexture(new Rect(c.x - R - 8, c.y - R - 8, (R + 8) * 2, (R + 8) * 2), radarTex);
+        radarRect = new Rect(c.x - R - 10, c.y - R - 10, (R + 10) * 2, (R + 10) * 2);
+        GUI.DrawTexture(radarRect, radarTex);
+        if (Event.current.type == EventType.MouseDown &&
+            radarRect.Contains(Event.current.mousePosition)) ToggleMap();
 
         foreach (var s in Ships)
         {
             if (s == null || s == PlayerShip) continue;
             Color col = s.faction == Faction.Enemy
                 ? new Color(1f, 0.3f, 0.25f) : new Color(0.35f, 1f, 0.55f);
-            Blip(c, RadarPoint(s.transform.position, range, R, out bool far), col, far ? 5f : 7f, far ? 0.55f : 1f);
+            Blip(c, RadarPoint(s.transform.position, range, R, out bool far), col, far ? 7f : 9f, far ? 0.55f : 1f);
         }
         foreach (var a in asteroids)
         {
             if (a == null) continue;
             Vector2 p = RadarPoint(a.transform.position, range, R, out bool far);
-            if (!far) Blip(c, p, new Color(0.75f, 0.7f, 0.6f), 3f, 0.6f);
+            if (!far) Blip(c, p, new Color(0.75f, 0.7f, 0.6f), 4f, 0.6f);
         }
 
-        // The planet: a big blue blip, rim-pinned when far.
-        if (Planet.Instance != null)
+        // Nav blips: every gravity source (planets, the super-giant) plus the
+        // carrier — rim-pinned when far, so they double as compass needles.
+        foreach (var src in GravityField.Sources)
         {
-            Vector2 pp = RadarPoint(Planet.Instance.transform.position, range, R, out bool planetFar);
-            Blip(c, pp, new Color(0.45f, 0.65f, 1f), 10f, planetFar ? 0.85f : 1f);
+            Vector2 sp = RadarPoint(src.center, range, R, out bool srcFar);
+            Blip(c, sp, src.radarColor, 13f, srcFar ? 0.85f : 1f);
+        }
+        if (Carrier.Instance != null)
+        {
+            Vector2 cp = RadarPoint(Carrier.Instance.transform.position, range, R, out bool carFar);
+            Blip(c, cp, new Color(0.3f, 0.9f, 1f), carFar ? 8f : 11f, 0.95f);
         }
 
         // Player marker + forward tick.
-        Blip(c, Vector2.zero, new Color(0.45f, 0.95f, 1f), 7f, 1f);
-        Blip(c, new Vector2(0f, -10f), new Color(0.45f, 0.95f, 1f), 3f, 0.8f);
+        Blip(c, Vector2.zero, new Color(0.45f, 0.95f, 1f), 9f, 1f);
+        Blip(c, new Vector2(0f, -13f), new Color(0.45f, 0.95f, 1f), 4f, 0.8f);
+
+        sSmall.alignment = TextAnchor.UpperCenter;
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f, 0.7f);
+        GUI.Label(new Rect(c.x - 80, c.y + R - 8, 160, 22), "M — map", sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        sSmall.alignment = TextAnchor.UpperLeft;
     }
 
     Vector2 RadarPoint(Vector3 world, float range, float radius, out bool clamped)
@@ -608,6 +744,37 @@ public class GameManager : MonoBehaviour
         return tx;
     }
 
+    // ── System map overlay ───────────────────────────────────────────────────
+    // The world is its own map: the camera orbits the real scene from afar,
+    // and these labels pin names onto the actual bodies.
+
+    void GuiMap(float sw, float sh)
+    {
+        Panel(new Rect(10, 10, 360, 66));
+        GUI.Label(new Rect(22, 16, 340, 26), "SYSTEM MAP", sSmall);
+        GUI.Label(new Rect(22, 40, 340, 26), "Drag — orbit · Scroll — zoom · M — close", sSmall);
+
+        foreach (var src in GravityField.Sources)
+            MapLabel(src.center, src.name, src.radarColor);
+        if (Carrier.Instance != null)
+            MapLabel(Carrier.Instance.transform.position, "CARRIER", new Color(0.3f, 0.9f, 1f));
+        if (PlayerShip != null)
+            MapLabel(PlayerShip.transform.position, "YOU", Color.white);
+    }
+
+    void MapLabel(Vector3 world, string label, Color col)
+    {
+        Vector3 sp = cam.WorldToScreenPoint(world);
+        if (sp.z < 0f) return;
+        float y = Screen.height - sp.y;
+        Blip(new Vector2(sp.x, y), Vector2.zero, col, 11f, 1f);
+        sSmall.alignment = TextAnchor.UpperCenter;
+        sSmall.normal.textColor = col;
+        GUI.Label(new Rect(sp.x - 90, y + 10, 180, 24), label, sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        sSmall.alignment = TextAnchor.UpperLeft;
+    }
+
     // ── Help overlay ─────────────────────────────────────────────────────────
 
     void DrawHelp(float sh)
@@ -617,18 +784,25 @@ public class GameManager : MonoBehaviour
             showHelp ? "H  —  hide controls" : "H  —  show controls", sSmall);
 
         if (!showHelp) return;
-        Panel(new Rect(10, sh - 332, 310, 282));
-        GUI.Label(new Rect(22, sh - 322, 290, 266),
+        Panel(new Rect(10, sh - 452, 320, 402));
+        GUI.Label(new Rect(22, sh - 442, 300, 386),
             "W / S — throttle\n" +
-            "Mouse — pitch & yaw\n" +
+            "Mouse or A / D — turn\n" +
             "Q / E — roll\n" +
             "Shift — boost      X — brake\n" +
-            "Space / LMB — fire\n\n" +
-            "Radar: top = your nose. Rim blips\n" +
-            "are out of range. Blue = planet.\n" +
-            "Fly tangent at ~70% speed to\n" +
-            "orbit it; ~90% breaks free.\n" +
-            "Land at under 14 m/s.", sSmall);
+            "T — turbo (drains the heat bar;\n" +
+            "     better engines last longer)\n" +
+            "G — anchor: lock dead still\n" +
+            "F — armor mode: plating soaks\n" +
+            "     all hits until it breaks\n" +
+            "Space / LMB — fire\n" +
+            "1 / 2 / 3 — chase / rear / free cam\n" +
+            "M — 3D system map\n\n" +
+            "Radar: top = your nose. Rim blips =\n" +
+            "far away. Blue dots = planets,\n" +
+            "orange = Titanhold, cyan = carrier.\n" +
+            "Gravity lives below each cloud\n" +
+            "layer. Land at under 14 m/s.", sSmall);
     }
 
     void GuiStranded(float sw, float sh)

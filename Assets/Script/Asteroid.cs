@@ -11,9 +11,9 @@ public class Asteroid : MonoBehaviour
 
     void FixedUpdate()
     {
-        // Free-floating rocks fall into the planet's gravity well too.
-        if (rb != null && Planet.Instance != null)
-            rb.AddForce(Planet.Instance.GravityAccel(transform.position), ForceMode.Acceleration);
+        // Free-floating rocks feel the cloud-layer gravity too.
+        if (rb != null)
+            rb.AddForce(GravityField.Sample(transform.position), ForceMode.Acceleration);
     }
 
     // scored=true when a player bullet did the damage.

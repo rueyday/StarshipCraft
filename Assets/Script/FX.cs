@@ -257,6 +257,11 @@ public static class FX
     // Sparkling dust torus for a planet's ring. Donut shape emits around the
     // local Z axis, so tip it 90° to lie in the belt's XZ plane.
     public static void RingDust(Transform parent, float ringRadius, float tubeRadius)
+        => RingDust(parent, ringRadius, tubeRadius, 900, 1.8f,
+            new Color(0.75f, 0.85f, 1f, 0.55f), new Color(1f, 0.9f, 0.7f, 0.35f));
+
+    public static void RingDust(Transform parent, float ringRadius, float tubeRadius,
+                                int count, float maxSize, Color colA, Color colB)
     {
         var ps = NewSystem("RingDust", parent, Vector3.zero);
         ps.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
@@ -264,17 +269,89 @@ public static class FX
         var main = ps.main;
         main.startLifetime   = 1e6f;
         main.startSpeed      = 0f;
-        main.startSize       = new ParticleSystem.MinMaxCurve(0.5f, 1.8f);
-        main.startColor      = new ParticleSystem.MinMaxGradient(
-            new Color(0.75f, 0.85f, 1f, 0.55f), new Color(1f, 0.9f, 0.7f, 0.35f));
+        main.startSize       = new ParticleSystem.MinMaxCurve(maxSize * 0.3f, maxSize);
+        main.startColor      = new ParticleSystem.MinMaxGradient(colA, colB);
         main.simulationSpace = ParticleSystemSimulationSpace.Local;
         main.maxParticles    = 900;
 
+        main.maxParticles = count;
         var shape = ps.shape;
         shape.shapeType   = ParticleSystemShapeType.Donut;
         shape.radius      = ringRadius;
         shape.donutRadius = tubeRadius;
-        ps.Emit(900);
+        ps.Emit(count);
+    }
+
+    // Looping ground-level dust haze; the caller drives position + emission.
+    public static ParticleSystem DustStorm()
+    {
+        var ps = NewSystem("DustStorm", null, Vector3.zero);
+        var main = ps.main;
+        main.startLifetime   = new ParticleSystem.MinMaxCurve(1.2f, 2.2f);
+        main.startSpeed      = new ParticleSystem.MinMaxCurve(18f, 32f);
+        main.startSize       = new ParticleSystem.MinMaxCurve(2.5f, 7f);
+        main.startColor      = new ParticleSystem.MinMaxGradient(
+            new Color(0.7f, 0.55f, 0.32f, 0.16f), new Color(0.85f, 0.7f, 0.45f, 0.1f));
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.maxParticles    = 500;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Sphere;
+        shape.radius    = 70f;
+
+        var em = ps.emission;
+        em.enabled = true;
+        em.rateOverTime = 0f;
+        return ps;
+    }
+
+    // Huge soft cloud banks drifting around the ship (Korrath's sky).
+    public static ParticleSystem CloudPuffs()
+    {
+        var ps = NewSystem("CloudPuffs", null, Vector3.zero);
+        var main = ps.main;
+        main.startLifetime   = new ParticleSystem.MinMaxCurve(6f, 11f);
+        main.startSpeed      = new ParticleSystem.MinMaxCurve(1f, 3f);
+        main.startSize       = new ParticleSystem.MinMaxCurve(35f, 95f);
+        main.startColor      = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 1f, 1f, 0.1f), new Color(0.85f, 0.9f, 0.95f, 0.06f));
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.maxParticles    = 300;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Sphere;
+        shape.radius    = 280f;
+        shape.radiusThickness = 0.5f;
+
+        var em = ps.emission;
+        em.enabled = true;
+        em.rateOverTime = 0f;
+        return ps;
+    }
+
+    // Snow streaming down toward the planet (Vessa's sky). The caller aims
+    // the system's +Z along local "down" each frame.
+    public static ParticleSystem SnowStorm()
+    {
+        var ps = NewSystem("SnowStorm", null, Vector3.zero);
+        var main = ps.main;
+        main.startLifetime   = new ParticleSystem.MinMaxCurve(2.5f, 4f);
+        main.startSpeed      = new ParticleSystem.MinMaxCurve(16f, 30f);
+        main.startSize       = new ParticleSystem.MinMaxCurve(0.25f, 0.8f);
+        main.startColor      = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 1f, 1f, 0.9f), new Color(0.85f, 0.92f, 1f, 0.6f));
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.maxParticles    = 1200;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Cone;
+        shape.angle     = 22f;
+        shape.radius    = 90f;
+
+        var em = ps.emission;
+        em.enabled = true;
+        em.rateOverTime = 0f;
+        return ps;
     }
 
     // Static field of glowing star particles surrounding the play area.

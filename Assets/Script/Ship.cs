@@ -25,16 +25,72 @@ public class Ship : MonoBehaviour
     [HideInInspector] public Vector3 TorqueInput;  // pitch, yaw, roll, each -1..1
     [HideInInspector] public bool    Boost;
     [HideInInspector] public bool    Brake;
+    [HideInInspector] public bool    Turbo;        // hold to burn heat for raw speed
 
     const float ThrustPerBlock = 220f;
     const float BoostMult      = 1.9f;
     const float TorqueScale    = 26f;
-    public const float MaxSpeed = 55f; // Planet tunes its gravity against this
-    const float FireInterval   = 0.24f;
+    public const float MaxSpeed   = 55f;
+    public const float TurboSpeed = 320f; // long hops between planets
+    const float TurboAccel   = 300f;
+    const float FireInterval = 0.24f;
 
     public Rigidbody Body { get; private set; }
     public int BlockCount => bp.Blocks.Count;
     public int ThrusterCount => thrusters.Count;
+
+    // Turbo endurance: each engine adds seconds to the heat pool — Mk I 4 s,
+    // Mk II 10 s. Regenerates at half rate when not burning.
+    public bool  TurboActive { get; private set; }
+    public float Heat01 => heatCapacity > 0f ? heat / heatCapacity : 0f;
+    float heat = -1f, heatCapacity;
+    float turboCut; // brief no-fire window after dropping out of turbo
+
+    // Anchor lock: the ship becomes kinematic — parked dead still against
+    // gravity, weapon impulses, everything. Guns still answer (turret mode).
+    public bool Anchored { get; private set; }
+
+    // Armor mode: while raised, every hit is redirected to the nearest Armor
+    // block — a shield that holds until your plating is shot away.
+    public bool ArmorMode { get; private set; }
+
+    public void SetAnchored(bool on)
+    {
+        if (Body == null || on == Anchored) return;
+        Anchored = on;
+        Body.isKinematic = on;
+        if (!on) Body.WakeUp();
+        FX.Flash(transform.position, FX.Accent(faction), 2.5f, 0.25f);
+    }
+
+    public void SetArmorMode(bool on)
+    {
+        if (on == ArmorMode) return;
+        if (on && !HasArmor()) return; // no plating, no shield
+        ArmorMode = on;
+        RefreshArmorGlow();
+    }
+
+    bool HasArmor()
+    {
+        foreach (var kv in bp.Blocks)
+            if (kv.Value.type == BlockType.Armor) return true;
+        return false;
+    }
+
+    void RefreshArmorGlow()
+    {
+        foreach (var kv in bp.Blocks)
+        {
+            if (kv.Value.type != BlockType.Armor) continue;
+            if (bodyRends.TryGetValue(kv.Key, out var r) && r != null)
+            {
+                var mpb = new MaterialPropertyBlock();
+                if (ArmorMode) mpb.SetColor("_EmissionColor", FX.Accent(faction) * 1.3f);
+                r.SetPropertyBlock(mpb);
+            }
+        }
+    }
 
     struct Mount
     {
@@ -160,6 +216,12 @@ public class Ship : MonoBehaviour
         Body.centerOfMass = com;
         steerAuthority = steer;
 
+        heatCapacity = 0f;
+        foreach (var kv in bp.Blocks)
+            if (kv.Value.type == BlockType.Thruster)
+                heatCapacity += kv.Value.mk == 2 ? 10f : 4f;
+        heat = heat < 0f ? heatCapacity : Mathf.Clamp(heat, 0f, heatCapacity);
+
         hullCol.sharedMesh = MeshFactory.BuildHullMesh(bp.Blocks.Keys);
     }
 
@@ -169,24 +231,51 @@ public class Ship : MonoBehaviour
     {
         if (Body == null) return;
 
-        float input = ThrustInput < 0f ? ThrustInput * 0.5f : ThrustInput;
-        float scale = (Boost ? BoostMult : 1f) * ThrustPerBlock;
-        foreach (var t in thrusters)
-            Body.AddForceAtPosition(transform.forward * input * scale * t.power,
-                                    transform.TransformPoint(t.pos));
+        if (Anchored) // dead stop — but the reactor still cools
+        {
+            TurboActive = false;
+            heat = Mathf.Min(heatCapacity, heat + Time.fixedDeltaTime * 0.5f);
+            turboCut = Mathf.Max(0f, turboCut - Time.fixedDeltaTime);
+            return;
+        }
 
-        if (Brake && Body.velocity.sqrMagnitude > 0.5f)
-            Body.AddForce(-Body.velocity.normalized * thrusters.Count * ThrustPerBlock * 0.35f);
+        // Turbo: burn the heat pool for raw straight-line speed. Wide turns,
+        // no combat; dropping out leaves a short vulnerable spool-down.
+        TurboActive = Turbo && heat > 0.05f && thrusters.Count > 0;
+        if (TurboActive)
+        {
+            heat = Mathf.Max(0f, heat - Time.fixedDeltaTime);
+            turboCut = 1f;
+            Body.AddForce(transform.forward * TurboAccel, ForceMode.Acceleration);
+        }
+        else
+        {
+            heat = Mathf.Min(heatCapacity, heat + Time.fixedDeltaTime * 0.5f);
+            turboCut = Mathf.Max(0f, turboCut - Time.fixedDeltaTime);
 
-        if (Body.velocity.magnitude > MaxSpeed)
-            Body.velocity = Body.velocity.normalized * MaxSpeed;
+            float input = ThrustInput < 0f ? ThrustInput * 0.5f : ThrustInput;
+            float scale = (Boost ? BoostMult : 1f) * ThrustPerBlock;
+            foreach (var t in thrusters)
+                Body.AddForceAtPosition(transform.forward * input * scale * t.power,
+                                        transform.TransformPoint(t.pos));
 
-        Vector3 torque = Vector3.ClampMagnitude(TorqueInput, 1.5f) * TorqueScale * steerAuthority;
+            if (Brake && Body.velocity.sqrMagnitude > 0.5f)
+                Body.AddForce(-Body.velocity.normalized * thrusters.Count * ThrustPerBlock * 0.35f);
+        }
+
+        float cap = TurboActive ? TurboSpeed : MaxSpeed;
+        if (Body.velocity.magnitude > cap)
+            Body.velocity = TurboActive
+                ? Body.velocity.normalized * cap
+                : Vector3.Lerp(Body.velocity, Body.velocity.normalized * cap,
+                               Time.fixedDeltaTime * 2f); // smooth spool-down
+
+        float agility = TurboActive ? 0.3f : 1f;
+        Vector3 torque = Vector3.ClampMagnitude(TorqueInput, 1.5f) * TorqueScale * steerAuthority * agility;
         Body.AddRelativeTorque(torque);
 
-        // Planet gravity well — mass cancels out, weak engines don't.
-        if (Planet.Instance != null)
-            Body.AddForce(Planet.Instance.GravityAccel(transform.position), ForceMode.Acceleration);
+        // Cloud-layer gravity — mass cancels out, weak engines don't.
+        Body.AddForce(GravityField.Sample(transform.position), ForceMode.Acceleration);
     }
 
     // Crash physics: hard impacts smash blocks off; gentle contact (landing,
@@ -212,8 +301,9 @@ public class Ship : MonoBehaviour
 
     void Update()
     {
-        // Engine plume + light track the throttle.
-        float burn = Mathf.Clamp01(Mathf.Abs(ThrustInput)) * (Boost ? 1.6f : 1f);
+        // Engine plume + light track the throttle (flat out during turbo).
+        float burn = TurboActive ? 2.2f
+                   : Mathf.Clamp01(Mathf.Abs(ThrustInput)) * (Boost ? 1.6f : 1f);
         foreach (var f in flames)
         {
             if (f == null) continue;
@@ -245,6 +335,7 @@ public class Ship : MonoBehaviour
 
     public void TryFire()
     {
+        if (TurboActive || turboCut > 0f) return; // no turbo-sniping; 1 s spool-down
         if (guns.Count == 0 || Time.time < nextFire) return;
 
         float rate = 0f;
@@ -270,10 +361,12 @@ public class Ship : MonoBehaviour
         Vector3 local = transform.InverseTransformPoint(worldPoint);
         Vector3Int nearest = Vector3Int.zero;
         float best = float.MaxValue;
-        foreach (var p in bp.Blocks.Keys)
+        bool shielded = ArmorMode && HasArmor();
+        foreach (var kv in bp.Blocks)
         {
-            float d = (local - (Vector3)p).sqrMagnitude;
-            if (d < best) { best = d; nearest = p; }
+            if (shielded && kv.Value.type != BlockType.Armor) continue; // plating soaks it
+            float d = (local - (Vector3)kv.Key).sqrMagnitude;
+            if (d < best) { best = d; nearest = kv.Key; }
         }
 
         if (nearest == Vector3Int.zero)
@@ -316,6 +409,7 @@ public class Ship : MonoBehaviour
             hp.Remove(cell);
         }
         RebuildPhysics();
+        if (ArmorMode && !HasArmor()) { ArmorMode = false; } // shield broken
 
         if (faction == Faction.Player && GameManager.Instance != null)
             GameManager.Instance.CameraShake(0.5f);
