@@ -60,3 +60,9 @@ Desktop.ini
 # Crash reports
 sysinfo.txt
 crashlytics-build.properties
+
+# IDE workspace
+.vs/
+
+# Local agent notes (not for the repo)
+CLAUDE.md
