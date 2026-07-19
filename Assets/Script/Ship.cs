@@ -10,9 +10,12 @@ public enum Faction { Player, Ally, Enemy }
 //    cube mesh into a convex hull — dynamic MeshColliders must be convex).
 //  - Each Thruster block pushes along ship-forward AT ITS OWN POSITION via
 //    AddForceAtPosition, so engines mounted off the center-of-mass line
-//    genuinely torque the ship. Balance your build or fly in circles.
-//  - Steering torque comes from Steering (RCS) blocks; authority grows with
-//    each block's lever arm from the center of mass.
+//    genuinely torque the ship — and more thrusters mean more total force.
+//  - Steering torque comes from RCS blocks; authority grows with every pod
+//    and with its lever arm from the center of mass.
+//  - Blocks have hit points (Armor soaks several hits). The Core is
+//    indestructible: the player never dies, but a ship with no thrusters
+//    left is stranded.
 public class Ship : MonoBehaviour
 {
     public Faction faction;
@@ -26,17 +29,26 @@ public class Ship : MonoBehaviour
     const float ThrustPerBlock = 220f;
     const float BoostMult      = 1.9f;
     const float TorqueScale    = 26f;
-    const float MaxSpeed       = 55f;
+    public const float MaxSpeed = 55f; // Planet tunes its gravity against this
     const float FireInterval   = 0.24f;
-    const float BulletSpeed    = 90f;
 
     public Rigidbody Body { get; private set; }
     public int BlockCount => bp.Blocks.Count;
+    public int ThrusterCount => thrusters.Count;
+
+    struct Mount
+    {
+        public Vector3Int pos;
+        public float power; // thrust multiplier, or gun mark
+        public Mount(Vector3Int p, float pw) { pos = p; power = pw; }
+    }
 
     ShipBlueprint bp;
     readonly Dictionary<Vector3Int, GameObject> blockObjs = new Dictionary<Vector3Int, GameObject>();
-    readonly List<Vector3Int> thrusters = new List<Vector3Int>();
-    readonly List<Vector3Int> guns      = new List<Vector3Int>();
+    readonly Dictionary<Vector3Int, Renderer> bodyRends = new Dictionary<Vector3Int, Renderer>();
+    readonly Dictionary<Vector3Int, int> hp = new Dictionary<Vector3Int, int>();
+    readonly List<Mount> thrusters = new List<Mount>();
+    readonly List<Mount> guns      = new List<Mount>();
     readonly List<ParticleSystem> flames  = new List<ParticleSystem>();
     readonly List<ParticleSystem> rcsJets = new List<ParticleSystem>();
     float steerAuthority;
@@ -63,7 +75,11 @@ public class Ship : MonoBehaviour
         hullCol = gameObject.AddComponent<MeshCollider>();
         hullCol.convex = true;
 
-        foreach (var kv in bp.Blocks) CreateBlockObj(kv.Key, kv.Value);
+        foreach (var kv in bp.Blocks)
+        {
+            CreateBlockObj(kv.Key, kv.Value);
+            hp[kv.Key] = ShipBlueprint.HpOf(kv.Value);
+        }
         RebuildPhysics();
 
         var lgo = new GameObject("EngineLight");
@@ -93,15 +109,16 @@ public class Ship : MonoBehaviour
         transform.localScale = Vector3.one;
     }
 
-    void CreateBlockObj(Vector3Int pos, BlockType type)
+    void CreateBlockObj(Vector3Int pos, BlockDef def)
     {
-        var go = new GameObject(type.ToString());
+        var go = new GameObject(def.type.ToString());
         go.transform.SetParent(transform, false);
         go.transform.localPosition = (Vector3)pos;
         blockObjs[pos] = go;
 
-        var rend = BlockVisuals.Attach(go.transform, type, faction);
-        switch (type)
+        var rend = BlockVisuals.Attach(go.transform, def, faction);
+        bodyRends[pos] = rend;
+        switch (def.type)
         {
             case BlockType.Core:
                 coreRend = rend;
@@ -127,14 +144,17 @@ public class Ship : MonoBehaviour
             float m = ShipBlueprint.MassOf(kv.Value);
             mass += m;
             com  += (Vector3)kv.Key * m;
-            if (kv.Value == BlockType.Thruster) thrusters.Add(kv.Key);
-            if (kv.Value == BlockType.Gun)      guns.Add(kv.Key);
+            if (kv.Value.type == BlockType.Thruster)
+                thrusters.Add(new Mount(kv.Key, ShipBlueprint.ThrustMult(kv.Value)));
+            if (kv.Value.type == BlockType.Gun)
+                guns.Add(new Mount(kv.Key, kv.Value.mk));
         }
         com /= mass;
 
         foreach (var kv in bp.Blocks)
-            if (kv.Value == BlockType.Steering)
-                steer += 0.7f + 0.5f * ((Vector3)kv.Key - com).magnitude;
+            if (kv.Value.type == BlockType.Steering)
+                steer += (0.7f + 0.5f * ((Vector3)kv.Key - com).magnitude)
+                       * ShipBlueprint.SteerMult(kv.Value);
 
         Body.mass = mass;
         Body.centerOfMass = com;
@@ -152,8 +172,8 @@ public class Ship : MonoBehaviour
         float input = ThrustInput < 0f ? ThrustInput * 0.5f : ThrustInput;
         float scale = (Boost ? BoostMult : 1f) * ThrustPerBlock;
         foreach (var t in thrusters)
-            Body.AddForceAtPosition(transform.forward * input * scale,
-                                    transform.TransformPoint(t));
+            Body.AddForceAtPosition(transform.forward * input * scale * t.power,
+                                    transform.TransformPoint(t.pos));
 
         if (Brake && Body.velocity.sqrMagnitude > 0.5f)
             Body.AddForce(-Body.velocity.normalized * thrusters.Count * ThrustPerBlock * 0.35f);
@@ -163,6 +183,31 @@ public class Ship : MonoBehaviour
 
         Vector3 torque = Vector3.ClampMagnitude(TorqueInput, 1.5f) * TorqueScale * steerAuthority;
         Body.AddRelativeTorque(torque);
+
+        // Planet gravity well — mass cancels out, weak engines don't.
+        if (Planet.Instance != null)
+            Body.AddForce(Planet.Instance.GravityAccel(transform.position), ForceMode.Acceleration);
+    }
+
+    // Crash physics: hard impacts smash blocks off; gentle contact (landing,
+    // scraping along the surface) just kicks up dust. Asteroids run their own
+    // collision damage, so they are skipped here.
+    void OnCollisionEnter(Collision col)
+    {
+        if (col.collider.GetComponent<Asteroid>() != null) return;
+
+        float speed = col.relativeVelocity.magnitude;
+        Vector3 point = col.GetContact(0).point;
+        if (speed > 14f)
+        {
+            TakeHit(point);
+            if (speed > 30f) TakeHit(point); // brutal impacts cost two blocks
+            FX.Explosion(point, new Color(1f, 0.7f, 0.3f), 0.6f);
+        }
+        else if (speed > 3f && col.collider.GetComponent<Planet>() != null)
+        {
+            FX.Impact(point, new Color(0.65f, 0.55f, 0.4f)); // touchdown dust
+        }
     }
 
     void Update()
@@ -201,17 +246,23 @@ public class Ship : MonoBehaviour
     public void TryFire()
     {
         if (guns.Count == 0 || Time.time < nextFire) return;
-        nextFire = Time.time + FireInterval / guns.Count;
+
+        float rate = 0f;
+        foreach (var g in guns) rate += g.power >= 2f ? 1.7f : 1f;
+        nextFire = Time.time + FireInterval / rate;
 
         gunIndex = (gunIndex + 1) % guns.Count;
-        Vector3 muzzle = transform.TransformPoint((Vector3)guns[gunIndex] + Vector3.forward * 1.55f);
+        var gun = guns[gunIndex];
+        float speed = gun.power >= 2f ? 125f : 90f;
+        Vector3 muzzle = transform.TransformPoint((Vector3)gun.pos + Vector3.forward * 1.55f);
         FX.MuzzleFlash(muzzle, FX.Accent(faction));
-        Bullet.Spawn(muzzle, transform.forward * BulletSpeed + Body.velocity, faction, hullCol);
+        Bullet.Spawn(muzzle, transform.forward * speed + Body.velocity, faction, hullCol);
     }
 
     // ── Damage ───────────────────────────────────────────────────────────────
 
-    // Destroys the block closest to the world-space hit point.
+    // Damages the block closest to the world-space hit point. Armor soaks
+    // several hits; the Core shrugs everything off (the hard rule: no death).
     public void TakeHit(Vector3 worldPoint)
     {
         if (bp == null || Body == null) return;
@@ -225,7 +276,31 @@ public class Ship : MonoBehaviour
             if (d < best) { best = d; nearest = p; }
         }
 
-        if (nearest == Vector3Int.zero) { Die(); return; } // core hit — ship destroyed
+        if (nearest == Vector3Int.zero)
+        {
+            // Core shield flare — takes the hit, never breaks.
+            FX.Impact(worldPoint, FX.Accent(faction));
+            FX.Flash(worldPoint, FX.Accent(faction), 3.5f, 0.25f);
+            return;
+        }
+
+        var def = bp.Blocks[nearest];
+        hp[nearest]--;
+        if (hp[nearest] > 0)
+        {
+            // Damaged but holding: sparks + progressively scorched body.
+            FX.Impact(worldPoint, new Color(1f, 0.75f, 0.4f));
+            if (bodyRends.TryGetValue(nearest, out var rend) && rend != null)
+            {
+                float frac = (float)hp[nearest] / ShipBlueprint.HpOf(def);
+                var mpb = new MaterialPropertyBlock();
+                mpb.SetColor("_Color", rend.sharedMaterial.color * Mathf.Lerp(0.3f, 1f, frac));
+                rend.SetPropertyBlock(mpb);
+            }
+            if (faction == Faction.Player && GameManager.Instance != null)
+                GameManager.Instance.CameraShake(0.25f);
+            return;
+        }
 
         foreach (var cell in bp.Remove(nearest)) // includes blocks orphaned from the core
         {
@@ -233,15 +308,28 @@ public class Ship : MonoBehaviour
             {
                 FX.Impact(go.transform.position, FX.Accent(faction));
                 FX.Debris(go.transform.position, go.transform.rotation,
-                          FX.BlockMat(faction, BlockType.Hull), Body.velocity);
+                          FX.BlockMat(faction, new BlockDef(BlockType.Hull)), Body.velocity);
                 Destroy(go);
             }
             blockObjs.Remove(cell);
+            bodyRends.Remove(cell);
+            hp.Remove(cell);
         }
         RebuildPhysics();
 
         if (faction == Faction.Player && GameManager.Instance != null)
             GameManager.Instance.CameraShake(0.5f);
+
+        // Out of engines: the player is stranded (no death — maybe they get
+        // rescued by a clever plan); NPC hulks just blow up.
+        if (thrusters.Count == 0)
+        {
+            if (faction == Faction.Player)
+            {
+                if (GameManager.Instance != null) GameManager.Instance.OnPlayerStranded();
+            }
+            else Die();
+        }
     }
 
     public void Die()
@@ -252,7 +340,7 @@ public class Ship : MonoBehaviour
         {
             if (go == null || ++debris > 14) break;
             FX.Debris(go.transform.position, go.transform.rotation,
-                      FX.BlockMat(faction, BlockType.Hull),
+                      FX.BlockMat(faction, new BlockDef(BlockType.Hull)),
                       Body.velocity + Random.insideUnitSphere * 6f);
         }
         if (GameManager.Instance != null) GameManager.Instance.OnShipDestroyed(this);

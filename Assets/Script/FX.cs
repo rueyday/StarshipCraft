@@ -38,16 +38,29 @@ public static class FX
         return m;
     }
 
-    public static Material BlockMat(Faction f, BlockType t)
+    public static Material BlockMat(Faction f, BlockDef d)
     {
         Color a = Accent(f);
-        switch (t)
+        bool mk2 = d.mk == 2;
+        switch (d.type)
         {
-            case BlockType.Core:     return Standard(Color.Lerp(a, Color.white, 0.3f), a * 2.2f, 0.2f, 0.9f);
-            case BlockType.Thruster: return Standard(new Color(0.16f, 0.16f, 0.19f), new Color(1f, 0.45f, 0.1f) * 0.25f);
-            case BlockType.Steering: return Standard(new Color(0.2f, 0.22f, 0.26f), a * 0.55f);
-            case BlockType.Gun:      return Standard(new Color(0.14f, 0.14f, 0.17f), a * 0.35f, 0.8f, 0.75f);
-            default:                 return Standard(new Color(0.3f, 0.33f, 0.4f), a * 0.07f, 0.75f, 0.7f);
+            case BlockType.Core:
+                return Standard(Color.Lerp(a, Color.white, 0.3f), a * 2.2f, 0.2f, 0.9f);
+            case BlockType.Armor:
+                return mk2 ? Standard(new Color(0.2f, 0.19f, 0.16f), a * 0.12f, 0.9f, 0.55f)
+                           : Standard(new Color(0.15f, 0.15f, 0.15f), Color.black, 0.85f, 0.4f);
+            case BlockType.Thruster:
+                return mk2 ? Standard(new Color(0.22f, 0.23f, 0.28f), new Color(0.4f, 0.7f, 1f) * 0.35f, 0.8f, 0.8f)
+                           : Standard(new Color(0.16f, 0.16f, 0.19f), new Color(1f, 0.45f, 0.1f) * 0.25f);
+            case BlockType.Steering:
+                return mk2 ? Standard(new Color(0.26f, 0.28f, 0.34f), a * 0.9f, 0.7f, 0.8f)
+                           : Standard(new Color(0.2f, 0.22f, 0.26f), a * 0.55f);
+            case BlockType.Gun:
+                return mk2 ? Standard(new Color(0.18f, 0.17f, 0.22f), a * 0.6f, 0.9f, 0.85f)
+                           : Standard(new Color(0.14f, 0.14f, 0.17f), a * 0.35f, 0.8f, 0.75f);
+            default: // Hull
+                return mk2 ? Standard(new Color(0.42f, 0.46f, 0.55f), a * 0.15f, 0.85f, 0.8f)
+                           : Standard(new Color(0.3f, 0.33f, 0.4f), a * 0.07f, 0.75f, 0.7f);
         }
     }
 
@@ -239,6 +252,29 @@ public static class FX
         rb.velocity = vel + Random.insideUnitSphere * 3f;
         rb.angularVelocity = Random.insideUnitSphere * 6f;
         Object.Destroy(go, 3f);
+    }
+
+    // Sparkling dust torus for a planet's ring. Donut shape emits around the
+    // local Z axis, so tip it 90° to lie in the belt's XZ plane.
+    public static void RingDust(Transform parent, float ringRadius, float tubeRadius)
+    {
+        var ps = NewSystem("RingDust", parent, Vector3.zero);
+        ps.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
+        var main = ps.main;
+        main.startLifetime   = 1e6f;
+        main.startSpeed      = 0f;
+        main.startSize       = new ParticleSystem.MinMaxCurve(0.5f, 1.8f);
+        main.startColor      = new ParticleSystem.MinMaxGradient(
+            new Color(0.75f, 0.85f, 1f, 0.55f), new Color(1f, 0.9f, 0.7f, 0.35f));
+        main.simulationSpace = ParticleSystemSimulationSpace.Local;
+        main.maxParticles    = 900;
+
+        var shape = ps.shape;
+        shape.shapeType   = ParticleSystemShapeType.Donut;
+        shape.radius      = ringRadius;
+        shape.donutRadius = tubeRadius;
+        ps.Emit(900);
     }
 
     // Static field of glowing star particles surrounding the play area.

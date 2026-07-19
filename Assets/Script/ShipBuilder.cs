@@ -9,7 +9,7 @@ using UnityEngine;
 public class ShipBuilder : MonoBehaviour
 {
     public ShipBlueprint Blueprint { get; private set; }
-    public BlockType Selected { get; private set; } = BlockType.Hull;
+    public BlockDef Selected { get; private set; } = new BlockDef(BlockType.Hull);
 
     Camera cam;
     readonly Dictionary<Vector3Int, GameObject> objs = new Dictionary<Vector3Int, GameObject>();
@@ -32,15 +32,23 @@ public class ShipBuilder : MonoBehaviour
         ghost.SetActive(false);
     }
 
-    void CreateObj(Vector3Int pos, BlockType type, bool animate)
+    void CreateObj(Vector3Int pos, BlockDef def, bool animate)
     {
-        var go = new GameObject(type.ToString());
+        var go = new GameObject(def.type.ToString());
         go.transform.SetParent(transform, false);
         go.transform.localPosition = (Vector3)pos;
-        BlockVisuals.Attach(go.transform, type, Faction.Player);
+        BlockVisuals.Attach(go.transform, def, Faction.Player);
         go.AddComponent<BoxCollider>(); // full 1m cell so face-aiming stays easy
         objs[pos] = go;
         if (animate) StartCoroutine(PopIn(go.transform));
+    }
+
+    void PaletteKey(KeyCode key, BlockType type)
+    {
+        if (!Input.GetKeyDown(key)) return;
+        Selected = Selected.type == type
+            ? new BlockDef(type, Selected.mk == 1 ? 2 : 1) // same key again: toggle tier
+            : new BlockDef(type);
     }
 
     // Placement animation: block scales up with a springy overshoot.
@@ -59,11 +67,14 @@ public class ShipBuilder : MonoBehaviour
 
     void Update()
     {
-        // ── Palette ──
-        if (Input.GetKeyDown(KeyCode.Alpha1)) Selected = BlockType.Hull;
-        if (Input.GetKeyDown(KeyCode.Alpha2)) Selected = BlockType.Thruster;
-        if (Input.GetKeyDown(KeyCode.Alpha3)) Selected = BlockType.Steering;
-        if (Input.GetKeyDown(KeyCode.Alpha4)) Selected = BlockType.Gun;
+        // ── Palette: number selects a block; same number (or Tab) toggles Mk II ──
+        PaletteKey(KeyCode.Alpha1, BlockType.Hull);
+        PaletteKey(KeyCode.Alpha2, BlockType.Thruster);
+        PaletteKey(KeyCode.Alpha3, BlockType.Steering);
+        PaletteKey(KeyCode.Alpha4, BlockType.Gun);
+        PaletteKey(KeyCode.Alpha5, BlockType.Armor);
+        if (Input.GetKeyDown(KeyCode.Tab))
+            Selected = new BlockDef(Selected.type, Selected.mk == 1 ? 2 : 1);
 
         // ── Orbit camera ──
         float ox = Input.GetAxis("Horizontal");

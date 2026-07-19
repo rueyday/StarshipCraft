@@ -46,7 +46,10 @@ public class Bullet : MonoBehaviour
     {
         var other = col.collider.attachedRigidbody;
 
-        var ast = other != null ? other.GetComponent<Asteroid>() : null;
+        // Check the collider itself first: belt rocks share the ring's
+        // kinematic rigidbody, so the Asteroid lives on the collider's object.
+        var ast = col.collider.GetComponent<Asteroid>();
+        if (ast == null && other != null) ast = other.GetComponent<Asteroid>();
         if (ast != null)
         {
             FX.Impact(transform.position, new Color(1f, 0.8f, 0.5f));

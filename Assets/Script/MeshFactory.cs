@@ -84,6 +84,33 @@ public static class MeshFactory
         return Build("Asteroid", verts, tris);
     }
 
+    static Mesh unitSphere;
+
+    // Smooth unit-radius sphere (used for oceans and atmospheres).
+    public static Mesh CreateSphereMesh()
+    {
+        if (unitSphere != null) return unitSphere;
+        var (v, t) = Icosphere(3);
+        unitSphere = Build("Sphere", v, t);
+        return unitSphere;
+    }
+
+    // Planet terrain: dense icosphere with layered Perlin mountains and
+    // valleys. Valleys dip below the ocean sphere, forming continents.
+    public static Mesh CreatePlanetMesh(int seed, float radius)
+    {
+        var (verts, tris) = Icosphere(4);
+        for (int i = 0; i < verts.Length; i++)
+        {
+            Vector3 n = verts[i];
+            float h = Mathf.PerlinNoise(n.x * 2.2f + seed * 0.13f, n.z * 2.2f + seed * 0.71f)
+                    + 0.5f * Mathf.PerlinNoise(n.y * 4.5f + seed * 0.37f, n.x * 4.5f);
+            h /= 1.5f;
+            verts[i] = n * radius * (0.94f + h * 0.12f);
+        }
+        return Build("Planet", verts, tris);
+    }
+
     // ── Icosphere ────────────────────────────────────────────────────────────
 
     static (Vector3[] v, int[] t) Icosphere(int subs)

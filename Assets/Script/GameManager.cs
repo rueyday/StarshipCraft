@@ -7,8 +7,12 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    enum State { Menu, Settings, Build, Playing, GameOver }
+    enum State { Menu, Settings, Build, Playing }
     State state = State.Menu;
+
+    // Hard rule: the player never dies. With every engine gone the ship is
+    // stranded — respawn on offer (score carries), but guns/RCS still work.
+    bool PlayerStranded => PlayerShip != null && PlayerShip.ThrusterCount == 0;
 
     // World population, driven by GameSettings.
     const float AsteroidSpawnRadius = 120f;
@@ -48,7 +52,7 @@ public class GameManager : MonoBehaviour
         }
         cam.clearFlags      = CameraClearFlags.SolidColor;
         cam.backgroundColor = new Color(0.01f, 0.015f, 0.045f);
-        cam.farClipPlane    = 1500f;
+        cam.farClipPlane    = 5000f; // the planet must stay visible from afar
 
         RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
         RenderSettings.ambientLight = new Color(0.18f, 0.2f, 0.28f);
@@ -62,6 +66,12 @@ public class GameManager : MonoBehaviour
         // read as infinitely distant no matter how far the player flies.
         starfieldRoot = new GameObject("StarfieldRoot").transform;
         FX.Starfield(starfieldRoot);
+
+        // The looming planet: fly down its gravity well to the surface, thread
+        // the orbiting belt — or crash trying. Big and close enough to fill
+        // half the sky, but its pull at spawn is a negligible drift.
+        Planet.Create(new Vector3(0f, -600f, 1500f), 700f);
+
         blueprint = DefaultPlayerBlueprint();
     }
 
@@ -81,20 +91,21 @@ public class GameManager : MonoBehaviour
 
             case State.Playing:
                 playTime += Time.deltaTime;
+                if (Input.GetKeyDown(KeyCode.H)) showHelp = !showHelp;
+                if (PlayerStranded && Input.GetKeyDown(KeyCode.R)) EnterBuild(false);
                 MaintainPopulation();
                 FollowCamera();
-                break;
-
-            case State.GameOver:
-                if (Input.GetKeyDown(KeyCode.R)) EnterBuild();
                 break;
         }
     }
 
     // ── State transitions ────────────────────────────────────────────────────
 
-    void EnterBuild()
+    // fresh=true starts a new scoring run (from the menu); fresh=false is a
+    // respawn after being stranded — score and clock carry over.
+    void EnterBuild(bool fresh)
     {
+        if (fresh) { score = 0; playTime = 0f; }
         ClearWorld();
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
@@ -112,8 +123,6 @@ public class GameManager : MonoBehaviour
         Destroy(builder.gameObject);
         builder = null;
 
-        score = 0;
-        playTime = 0f;
         PlayerShip = SpawnShip(blueprint, Faction.Player, Vector3.zero, Quaternion.identity);
         PlayerShip.gameObject.AddComponent<PlayerController>();
 
@@ -281,15 +290,11 @@ public class GameManager : MonoBehaviour
     {
         Ships.Remove(ship);
         if (ship.faction == Faction.Enemy) score += 500;
-        if (ship == PlayerShip)
-        {
-            PlayerShip = null;
-            CameraShake(2f);
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-            state = State.GameOver;
-        }
     }
+
+    // Called the moment the last engine dies. Play stays live — the stranded
+    // banner and respawn key are handled in Update/GuiPlaying.
+    public void OnPlayerStranded() => CameraShake(1.5f);
 
     public void CameraShake(float amount) => shake = Mathf.Max(shake, amount);
 
@@ -317,32 +322,34 @@ public class GameManager : MonoBehaviour
     static ShipBlueprint DefaultPlayerBlueprint()
     {
         var bp = new ShipBlueprint();
-        bp.TryAdd(new Vector3Int(0, 0, 1),  BlockType.Hull);
-        bp.TryAdd(new Vector3Int(0, 0, 2),  BlockType.Gun);
-        bp.TryAdd(new Vector3Int(-1, 0, 0), BlockType.Hull);
-        bp.TryAdd(new Vector3Int(1, 0, 0),  BlockType.Hull);
-        bp.TryAdd(new Vector3Int(-1, 0, -1), BlockType.Thruster);
-        bp.TryAdd(new Vector3Int(1, 0, -1), BlockType.Thruster);
-        bp.TryAdd(new Vector3Int(0, 1, 0),  BlockType.Steering);
-        bp.TryAdd(new Vector3Int(0, -1, 0), BlockType.Steering);
+        bp.TryAdd(new Vector3Int(0, 0, 1),  new BlockDef(BlockType.Hull));
+        bp.TryAdd(new Vector3Int(0, 0, 2),  new BlockDef(BlockType.Gun));
+        bp.TryAdd(new Vector3Int(-1, 0, 0), new BlockDef(BlockType.Hull));
+        bp.TryAdd(new Vector3Int(1, 0, 0),  new BlockDef(BlockType.Hull));
+        bp.TryAdd(new Vector3Int(-1, 0, -1), new BlockDef(BlockType.Thruster));
+        bp.TryAdd(new Vector3Int(1, 0, -1), new BlockDef(BlockType.Thruster));
+        bp.TryAdd(new Vector3Int(0, 1, 0),  new BlockDef(BlockType.Steering));
+        bp.TryAdd(new Vector3Int(0, -1, 0), new BlockDef(BlockType.Steering));
         return bp;
     }
 
+    // NPCs fly Mk II hardware once the skill slider passes 1.3.
     static ShipBlueprint NPCBlueprint()
     {
+        int mk = GameSettings.npcSkill > 1.3f ? 2 : 1;
         var bp = new ShipBlueprint();
-        bp.TryAdd(new Vector3Int(0, 0, 1),  BlockType.Hull);
-        bp.TryAdd(new Vector3Int(0, 0, 2),  BlockType.Gun);
-        bp.TryAdd(new Vector3Int(-1, 0, 0), BlockType.Hull);
-        bp.TryAdd(new Vector3Int(1, 0, 0),  BlockType.Hull);
-        bp.TryAdd(new Vector3Int(-1, 0, -1), BlockType.Thruster);
-        bp.TryAdd(new Vector3Int(1, 0, -1), BlockType.Thruster);
-        bp.TryAdd(new Vector3Int(0, 1, 0),  BlockType.Steering);
-        bp.TryAdd(new Vector3Int(0, -1, 0), BlockType.Steering);
+        bp.TryAdd(new Vector3Int(0, 0, 1),  new BlockDef(BlockType.Hull, mk));
+        bp.TryAdd(new Vector3Int(0, 0, 2),  new BlockDef(BlockType.Gun, mk));
+        bp.TryAdd(new Vector3Int(-1, 0, 0), new BlockDef(BlockType.Hull, mk));
+        bp.TryAdd(new Vector3Int(1, 0, 0),  new BlockDef(BlockType.Hull, mk));
+        bp.TryAdd(new Vector3Int(-1, 0, -1), new BlockDef(BlockType.Thruster, mk));
+        bp.TryAdd(new Vector3Int(1, 0, -1), new BlockDef(BlockType.Thruster, mk));
+        bp.TryAdd(new Vector3Int(0, 1, 0),  new BlockDef(BlockType.Steering, mk));
+        bp.TryAdd(new Vector3Int(0, -1, 0), new BlockDef(BlockType.Steering, mk));
         if (Random.value > 0.5f)
         {
-            bp.TryAdd(new Vector3Int(-1, 0, 1), BlockType.Gun);
-            bp.TryAdd(new Vector3Int(1, 0, 1),  BlockType.Gun);
+            bp.TryAdd(new Vector3Int(-1, 0, 1), new BlockDef(BlockType.Gun));
+            bp.TryAdd(new Vector3Int(1, 0, 1),  new BlockDef(BlockType.Gun));
         }
         return bp;
     }
@@ -350,8 +357,9 @@ public class GameManager : MonoBehaviour
     // ── HUD ──────────────────────────────────────────────────────────────────
 
     GUIStyle sTitle, sMed, sSmall, sBtn;
-    Texture2D boxTex;
+    Texture2D boxTex, radarTex;
     bool stylesBuilt;
+    bool showHelp;
     float titlePulse;
 
     void BuildStyles()
@@ -368,13 +376,15 @@ public class GameManager : MonoBehaviour
         sTitle = new GUIStyle(GUI.skin.label) { fontSize = 52, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
         sTitle.normal.textColor = cyan;
 
-        sMed = new GUIStyle(GUI.skin.label) { fontSize = 24, alignment = TextAnchor.MiddleCenter };
+        sMed = new GUIStyle(GUI.skin.label) { fontSize = 24, alignment = TextAnchor.MiddleCenter, wordWrap = true };
         sMed.normal.textColor = Color.white;
 
-        sSmall = new GUIStyle(GUI.skin.label) { fontSize = 17, alignment = TextAnchor.UpperLeft };
+        sSmall = new GUIStyle(GUI.skin.label) { fontSize = 17, alignment = TextAnchor.UpperLeft, wordWrap = true };
         sSmall.normal.textColor = cyan;
 
         sBtn = new GUIStyle(GUI.skin.button) { fontSize = 22 };
+
+        radarTex = MakeRadarTex(160);
     }
 
     void Panel(Rect r) => GUI.DrawTexture(r, boxTex);
@@ -390,7 +400,6 @@ public class GameManager : MonoBehaviour
             case State.Settings: GuiSettings(sw, sh); break;
             case State.Build:    GuiBuild(sw, sh); break;
             case State.Playing:  GuiPlaying(sw, sh); break;
-            case State.GameOver: GuiGameOver(sw, sh); break;
         }
     }
 
@@ -402,10 +411,10 @@ public class GameManager : MonoBehaviour
 
         Panel(new Rect(sw / 2 - 320, sh / 2 - 190, 640, 380));
         GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 170, 600, 80), "STARSHIP CRAFT", sTitle);
-        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 90, 600, 40),
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 95, 600, 75),
             "Build a block ship. Balance your engines. Survive the belt.", sMed);
 
-        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 - 10, 220, 52), "BUILD SHIP", sBtn)) EnterBuild();
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 - 10, 220, 52), "BUILD SHIP", sBtn)) EnterBuild(true);
         if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 55, 220, 52), "SETTINGS", sBtn)) state = State.Settings;
     }
 
@@ -443,44 +452,50 @@ public class GameManager : MonoBehaviour
 
     void GuiBuild(float sw, float sh)
     {
-        Panel(new Rect(10, 10, 340, 236));
+        Panel(new Rect(10, 10, 350, 306));
         GUI.Label(new Rect(22, 16, 300, 30), "SHIPYARD", sSmall);
         string[] names =
         {
-            "1  Hull", "2  Thruster (engine)", "3  RCS (turning jets)", "4  Gun",
+            "1  Hull", "2  Thruster (engine)", "3  RCS (turning jets)", "4  Gun", "5  Armor",
         };
         string[] descs =
         {
-            "Armor and structure. Cheap mass.",
-            "Pushes forward from where it sits —\nmount engines around the center line.",
-            "Turns the ship. Stronger mounted\nfar from the center of mass.",
-            "Forward-firing cannon. More guns,\nfaster combined fire rate.",
+            "Structure. Mk II: lighter alloy, takes 2 hits.",
+            "Pushes forward from where it sits. More thrusters = more force — big ships need banks of them. Mk II: 1.8× thrust.",
+            "Turning jets. Every pod turns you faster, especially mounted far from the center of mass. Mk II: 1.9× authority.",
+            "Forward cannon. More guns = faster combined fire. Mk II: quicker, faster bolts.",
+            "Heavy plating that soaks 3 hits before breaking. Mk II: 5 hits, heavier.",
         };
-        BlockType[] types = { BlockType.Hull, BlockType.Thruster, BlockType.Steering, BlockType.Gun };
-        int selIdx = 0;
-        for (int i = 0; i < 4; i++)
+        BlockType[] types =
         {
-            bool sel = builder != null && builder.Selected == types[i];
+            BlockType.Hull, BlockType.Thruster, BlockType.Steering, BlockType.Gun, BlockType.Armor,
+        };
+        int selIdx = 0;
+        for (int i = 0; i < 5; i++)
+        {
+            bool sel = builder != null && builder.Selected.type == types[i];
             if (sel) selIdx = i;
+            string mk = sel && builder.Selected.mk == 2 ? "  — Mk II ★" : "";
             sSmall.normal.textColor = sel ? Color.white : new Color(0.45f, 0.95f, 1f, 0.75f);
-            GUI.Label(new Rect(22, 44 + i * 24, 300, 24), (sel ? "▶ " : "   ") + names[i], sSmall);
+            GUI.Label(new Rect(22, 44 + i * 24, 320, 24), (sel ? "▶ " : "   ") + names[i] + mk, sSmall);
         }
         sSmall.normal.textColor = new Color(0.8f, 0.9f, 1f, 0.9f);
-        GUI.Label(new Rect(22, 142, 310, 44), descs[selIdx], sSmall);
+        GUI.Label(new Rect(22, 168, 320, 72), descs[selIdx], sSmall);
         sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
-        GUI.Label(new Rect(22, 190, 300, 48),
-            "LMB place  ·  RMB remove\nWASD orbit  ·  Scroll zoom", sSmall);
+        GUI.Label(new Rect(22, 244, 320, 52),
+            "Same number / Tab — Mk II   ·   LMB place\nRMB remove   ·   WASD orbit   ·   Scroll zoom", sSmall);
 
-        Panel(new Rect(10, sh - 96, 460, 86));
-        GUI.Label(new Rect(22, sh - 88, 440, 26),
+        Panel(new Rect(10, sh - 96, 560, 86));
+        GUI.Label(new Rect(22, sh - 88, 540, 26),
             $"Blocks {blueprint.Blocks.Count}   Thrusters {blueprint.Count(BlockType.Thruster)}   " +
-            $"RCS {blueprint.Count(BlockType.Steering)}   Guns {blueprint.Count(BlockType.Gun)}", sSmall);
+            $"RCS {blueprint.Count(BlockType.Steering)}   Guns {blueprint.Count(BlockType.Gun)}   " +
+            $"Armor {blueprint.Count(BlockType.Armor)}", sSmall);
         sSmall.normal.textColor = ReadyToLaunch() ? new Color(0.4f, 1f, 0.6f) : new Color(1f, 0.6f, 0.3f);
-        GUI.Label(new Rect(22, sh - 60, 440, 26),
+        GUI.Label(new Rect(22, sh - 60, 540, 26),
             ReadyToLaunch() ? "Press ENTER to launch"
                             : "Add at least one Thruster to launch", sSmall);
         sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
-        GUI.Label(new Rect(22, sh - 36, 440, 24),
+        GUI.Label(new Rect(22, sh - 36, 540, 24),
             "Tip: keep thrust symmetric around the center of mass", sSmall);
     }
 
@@ -508,19 +523,123 @@ public class GameManager : MonoBehaviour
         GUI.DrawTexture(new Rect(cx - 1, cy - 12, 2, 8), Texture2D.whiteTexture);
         GUI.DrawTexture(new Rect(cx - 1, cy + 4,  2, 8), Texture2D.whiteTexture);
         GUI.color = Color.white;
+
+        DrawRadar(sw, sh);
+        DrawHelp(sh);
+        if (PlayerStranded) GuiStranded(sw, sh);
     }
 
-    void GuiGameOver(float sw, float sh)
+    // ── Radar ────────────────────────────────────────────────────────────────
+    // Top of the radar = the direction your nose points. Blips at the rim are
+    // out of range — fly toward them.
+
+    void DrawRadar(float sw, float sh)
     {
-        Panel(new Rect(sw / 2 - 300, sh / 2 - 140, 600, 280));
-        sTitle.normal.textColor = new Color(1f, 0.35f, 0.3f);
-        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 120, 600, 70), "SHIP DESTROYED", sTitle);
-        sTitle.normal.textColor = new Color(0.45f, 0.95f, 1f);
-        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 40, 600, 40),
-            $"Score {score}   ·   Survived {playTime:0}s", sMed);
-        GUI.Label(new Rect(sw / 2 - 300, sh / 2 + 10, 600, 40),
-            "Your blueprint is saved — refit and fly again", sMed);
-        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 65, 220, 50), "REBUILD  (R)", sBtn))
-            EnterBuild();
+        if (PlayerShip == null) return;
+        const float R = 82f, range = 260f;
+        Vector2 c = new Vector2(sw - 112f, sh - 112f);
+
+        GUI.DrawTexture(new Rect(c.x - R - 8, c.y - R - 8, (R + 8) * 2, (R + 8) * 2), radarTex);
+
+        foreach (var s in Ships)
+        {
+            if (s == null || s == PlayerShip) continue;
+            Color col = s.faction == Faction.Enemy
+                ? new Color(1f, 0.3f, 0.25f) : new Color(0.35f, 1f, 0.55f);
+            Blip(c, RadarPoint(s.transform.position, range, R, out bool far), col, far ? 5f : 7f, far ? 0.55f : 1f);
+        }
+        foreach (var a in asteroids)
+        {
+            if (a == null) continue;
+            Vector2 p = RadarPoint(a.transform.position, range, R, out bool far);
+            if (!far) Blip(c, p, new Color(0.75f, 0.7f, 0.6f), 3f, 0.6f);
+        }
+
+        // The planet: a big blue blip, rim-pinned when far.
+        if (Planet.Instance != null)
+        {
+            Vector2 pp = RadarPoint(Planet.Instance.transform.position, range, R, out bool planetFar);
+            Blip(c, pp, new Color(0.45f, 0.65f, 1f), 10f, planetFar ? 0.85f : 1f);
+        }
+
+        // Player marker + forward tick.
+        Blip(c, Vector2.zero, new Color(0.45f, 0.95f, 1f), 7f, 1f);
+        Blip(c, new Vector2(0f, -10f), new Color(0.45f, 0.95f, 1f), 3f, 0.8f);
+    }
+
+    Vector2 RadarPoint(Vector3 world, float range, float radius, out bool clamped)
+    {
+        Vector3 local = PlayerShip.transform.InverseTransformPoint(world);
+        Vector2 p = new Vector2(local.x, local.z) / range;
+        clamped = p.magnitude > 1f;
+        if (clamped) p = p.normalized;
+        return new Vector2(p.x, -p.y) * radius;
+    }
+
+    static void Blip(Vector2 center, Vector2 offset, Color col, float size, float alpha)
+    {
+        GUI.color = new Color(col.r, col.g, col.b, alpha);
+        GUI.DrawTexture(new Rect(center.x + offset.x - size / 2f,
+                                 center.y + offset.y - size / 2f, size, size),
+                        Texture2D.whiteTexture);
+        GUI.color = Color.white;
+    }
+
+    Texture2D MakeRadarTex(int s)
+    {
+        var tx = new Texture2D(s, s, TextureFormat.RGBA32, false);
+        float half = (s - 1) * 0.5f;
+        for (int y = 0; y < s; y++)
+            for (int x = 0; x < s; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x, y), new Vector2(half, half)) / half;
+                Color col = Color.clear;
+                if (d <= 1f)
+                {
+                    col = new Color(0.02f, 0.07f, 0.11f, 0.8f);
+                    bool cross = Mathf.Abs(x - half) < 0.7f || Mathf.Abs(y - half) < 0.7f;
+                    bool ring  = Mathf.Abs(d - 0.5f) < 0.012f;
+                    if (d > 0.94f)          col = new Color(0.45f, 0.95f, 1f, 0.85f);
+                    else if (cross || ring) col = new Color(0.45f, 0.95f, 1f, 0.16f);
+                }
+                tx.SetPixel(x, y, col);
+            }
+        tx.Apply();
+        return tx;
+    }
+
+    // ── Help overlay ─────────────────────────────────────────────────────────
+
+    void DrawHelp(float sh)
+    {
+        Panel(new Rect(10, sh - 42, 220, 32));
+        GUI.Label(new Rect(22, sh - 37, 210, 26),
+            showHelp ? "H  —  hide controls" : "H  —  show controls", sSmall);
+
+        if (!showHelp) return;
+        Panel(new Rect(10, sh - 332, 310, 282));
+        GUI.Label(new Rect(22, sh - 322, 290, 266),
+            "W / S — throttle\n" +
+            "Mouse — pitch & yaw\n" +
+            "Q / E — roll\n" +
+            "Shift — boost      X — brake\n" +
+            "Space / LMB — fire\n\n" +
+            "Radar: top = your nose. Rim blips\n" +
+            "are out of range. Blue = planet.\n" +
+            "Fly tangent at ~70% speed to\n" +
+            "orbit it; ~90% breaks free.\n" +
+            "Land at under 14 m/s.", sSmall);
+    }
+
+    void GuiStranded(float sw, float sh)
+    {
+        Panel(new Rect(sw / 2 - 330, sh - 190, 660, 130));
+        sMed.normal.textColor = new Color(1f, 0.55f, 0.25f);
+        GUI.Label(new Rect(sw / 2 - 320, sh - 182, 640, 40), "STRANDED — ALL ENGINES DESTROYED", sMed);
+        sMed.normal.textColor = Color.white;
+        GUI.Label(new Rect(sw / 2 - 320, sh - 140, 640, 70),
+            "You can't die out here. Guns and RCS still answer — fight on, or press R " +
+            "to tow the core back to the shipyard and respawn (score carries over).", sMed);
+        sMed.normal.textColor = Color.white;
     }
 }
