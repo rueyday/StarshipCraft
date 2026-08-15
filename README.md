@@ -128,24 +128,28 @@ weightless.
   runway strips. Settle onto the marked pad under 6 m/s and press **E** to
   refit in the shipyard without leaving the world; launches and stranded
   respawns return you to the deck.
-Each world's sky is its own scene, No Man's Sky-style: cross the cloud top
-and the weather takes over, thickening all the way down to the surface.
+Planets work No Man's Sky-style. In space you see every globe at once —
+they're landmarks you fly **into**, not meshes you land on. Punch through a
+globe's translucent **cloud shell** and the game swaps you into that planet's
+own surface scene: a **flat** ground under that world's weather (flat terrain
+is cheap to render and plays better than a giant sphere). Each surface
+**loops**: fly straight for 3 km and you seamlessly arrive back where you
+started — that's how a flat map plays "round". Climb back above the clouds
+(~650 m) and you pop out into space beside the globe.
 
-- **Korrath** (blue blip) — a 1.4 km rocky world with mountains, oceans and a
-  tilted orbital belt of ~70 rocks amid ring dust (gentle bumps under 6 m/s
-  bounce harmlessly). Enter its sky and you're **flying through cloud banks**:
-  soft white fog and huge drifting puffs. Land under ~14 m/s for dust, not
-  damage; harder impacts smash blocks (two past 30 m/s).
-- **Vessa** (blue blip) — a 650 m ice world. Its sky is a **snow storm**:
-  pale-blue fog and flakes streaming down toward the surface.
-- **Titanhold** (orange blip) — the Saturn of the system: the flat play region
-  rides the top cap of a **30 km butterscotch globe**. Its entire sky is a
-  **giant dust storm** — sand-gold fog and wind-blown grit from the cloud top
-  all the way to the wind-scoured ground. Wrapping the globe below the play
-  cap — with a proper Saturn gap off its flank — races a **four-band golden
-  ring** (16.5–21 km out), spinning with embedded debris streaming past at
-  over 2 km/s. Beautiful from any distance, lethal inside: anything in the
-  band loses a block roughly twice a second.
+- **Korrath** (blue blip) — a 1.4 km rocky globe with oceans and a tilted
+  orbital belt of ~70 rocks amid ring dust (gentle bumps under 6 m/s bounce
+  harmlessly). Inside, its sky is **cloud banks**: soft white fog and huge
+  drifting puffs over dark rock. Land under ~14 m/s for dust, not damage;
+  harder impacts smash blocks (two past 30 m/s).
+- **Vessa** (blue blip) — a 650 m ice globe. Inside: a **snow storm** —
+  pale-blue fog and flakes streaming down over pale ground.
+- **Titanhold** (orange blip) — the Saturn of the system: a 3.5 km
+  butterscotch globe wrapped in a **four-band golden ring** (9–12 km out,
+  spinning, with embedded debris racing past at over a kilometer per second).
+  The ring is lethal: anything inside the band loses a block roughly twice a
+  second. Inside the globe: a **giant dust storm**, sand-gold fog and
+  wind-blown grit down to wind-scoured flats.
 
 **Turbo** covers the distances: hold T for ~220 m/s straight-line flight. It
 drains a heat pool fed by your engines (Mk I ≈ 4 s each, Mk II ≈ 10 s each,
@@ -158,7 +162,9 @@ second after you drop out — no turbo-sniping.
   (Large 100 pts → 2 Medium 50 pts → 2 Small 25 pts). Ramming one smashes a
   block off your ship.
 - **Hostile ships** (red) hunt you and your allies, lead their shots, and
-  boost to close distance. Kill: **500 pts**.
+  boost to close distance. Kill: **500 pts**. About one in five is an
+  **armored gunship** — an 18-block heavy with an armor prow, four engines
+  and triple guns, worth **900 pts**.
 - **Allied ships** (green) hunt hostiles and fly in formation near you when
   the sky is clear.
 - NPC ships are built from the same block system and obey the same physics —
@@ -176,6 +182,7 @@ From the main menu, **Settings** exposes sliders plus Easy / Normal / Hard prese
 | Enemy ships | 0–8 | Hostile NPCs kept alive |
 | Allied ships | 0–4 | Friendly NPCs kept alive |
 | NPC speed / skill | 0.5–2 | NPC turn rate, throttle and aggression |
+| Mouse sensitivity | 0.2–1.5 | Flight stick feel (plus an Invert Y toggle) |
 
 ---
 
@@ -188,8 +195,20 @@ Everything is procedural — no textures, models, or prefabs on disk:
 - Engine plumes (particles + light) that track your throttle, RCS puffs while turning, pulsing power core
 - Muzzle flashes, bullet trails, impact sparks, explosions with debris and light flashes
 - Block "pop-in" placement animation and ship warp-in spawn animation
-- 1,200-star particle starfield, camera shake on damage, FOV boost kick
+- 1,200-star particle starfield, a blazing sun disc with halo, slowly rotating
+  planet globes with counter-drifting cloud shells
+- The carrier lives: blinking nav beacons (green bow / red stern / cyan mast),
+  glowing runway chevrons, triple engine bells, antenna masts
+- Surface dressing per world: dunes and wind-scour on Titanhold, ice mounds and
+  frozen lakes on Vessa, moss fields, ponds and worn slabs on Korrath — plus
+  per-world sky colors and lightning deep in Korrath's cloud banks
+- Damaged blocks scorch, then leak sparks and smoke until they break; Mk II
+  engines burn blue-hot
+- Title cards on scene transitions ("ENTERING KORRATH — CLOUD BANKS"), a
+  speed/altitude readout, camera shake on damage, FOV boost kick
 - Procedural radar dial with faction-colored blips, and an H-key controls overlay
+- Shipyard engineering panel (mass, acceleration, turn, turbo pool) with
+  center-of-mass and thrust-centroid markers — align them to fly straight
 
 ---
 
@@ -207,9 +226,10 @@ All scripts live in `Assets/Script/`.
 | `PlayerController.cs` | Input → Ship |
 | `NPCController.cs` | Friend/foe dogfight AI → Ship |
 | `Bullet.cs` | Faction-aware energy bolt with trail |
-| `GravityField.cs` | Cloud-layer gravity: constant below clouds, fades in-band, zero above |
-| `Planet.cs` | Round planets: terrain/ocean/atmosphere/cloud shell, orbiting belt ring |
-| `Supergiant.cs` | The flat super-giant: streamed canyon/pillar chunks, cloud decks |
+| `GravityField.cs` | Cloud-layer gravity: constant below clouds, fades in-band, zero above (space itself is zero-g) |
+| `Planet.cs` | `PlanetDef` world data + `SpacePlanet` globes: terrain/ocean/cloud shell, belt, the deadly spinning ring |
+| `SurfaceWorld.cs` | Per-planet flat surface scene with toroidal wrap (the 3 km loop) |
+| `Weather.cs` | Per-world atmosphere scenes: dust storm / cloud banks / snow storm |
 | `Carrier.cs` | The carrier: landable deck, refit pad, spawn point |
 | `Asteroid.cs` | Split/score notifications, planet gravity, ram damage with a gentle-bump threshold |
 | `MeshFactory.cs` | Procedural meshes: hard-edged cube, combined hull mesh for the convex collider, Perlin-displaced icosphere asteroids |

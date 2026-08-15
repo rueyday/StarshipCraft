@@ -4,8 +4,6 @@ using UnityEngine;
 // Q/E roll, Shift boost, X brake, Space/LMB fire.
 public class PlayerController : MonoBehaviour
 {
-    [SerializeField] float mouseSens = 0.55f;
-
     Ship ship;
 
     void Awake() => ship = GetComponent<Ship>();
@@ -26,8 +24,10 @@ public class PlayerController : MonoBehaviour
         ship.Brake = Input.GetKey(KeyCode.X);
         ship.Turbo = Input.GetKey(KeyCode.T);
 
-        float pitch = Mathf.Clamp(-Input.GetAxis("Mouse Y") * mouseSens, -1f, 1f);
-        float yaw   = Mathf.Clamp(Input.GetAxis("Mouse X") * mouseSens
+        float sens = GameSettings.mouseSens;
+        float sign = GameSettings.invertY ? 1f : -1f;
+        float pitch = Mathf.Clamp(Input.GetAxis("Mouse Y") * sens * sign, -1f, 1f);
+        float yaw   = Mathf.Clamp(Input.GetAxis("Mouse X") * sens
                                   + Input.GetAxis("Horizontal") * 0.8f, -1f, 1f); // A/D turn too
         float roll  = Input.GetKey(KeyCode.Q) ? 1f : Input.GetKey(KeyCode.E) ? -1f : 0f;
         ship.TorqueInput = new Vector3(pitch, yaw, roll);

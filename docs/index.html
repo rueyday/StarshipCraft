@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Starship Craft — build a block ship with real physics and survive a star system of storm-wrapped worlds. Fully procedural Unity game.">
+<title>Starship Craft</title>
+<style>
+  :root {
+    --void: #04070F;
+    --panel: #0A1220;
+    --panel-2: #0D1728;
+    --line: #1B3242;
+    --line-hot: #2E5A6E;
+    --cyan: #73F2FF;
+    --cyan-dim: #3E8FA0;
+    --text: #C9E4EC;
+    --muted: #6E8894;
+    --gold: #FFC45C;
+    --green: #59FF8C;
+    --red: #FF5A4E;
+    --ice: #A9CFFF;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+  }
+  body {
+    background: var(--void);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  #stars { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+  main { position: relative; z-index: 1; }
+
+  a { color: var(--cyan); }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 3px;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ── HUD panel with targeting-bracket corners ── */
+  .panel {
+    position: relative;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line);
+    padding: 28px;
+  }
+  .panel::before, .panel::after {
+    content: "";
+    position: absolute;
+    width: 14px; height: 14px;
+    border-color: var(--cyan-dim);
+    border-style: solid;
+    transition: border-color 0.25s;
+  }
+  .panel::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+  .panel::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+  .panel:hover::before, .panel:hover::after { border-color: var(--cyan); }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+  .eyebrow::before { content: "// "; color: var(--cyan-dim); }
+
+  h1, h2, h3 { text-wrap: balance; font-family: var(--sans); }
+  h2 {
+    font-size: clamp(24px, 3.4vw, 34px);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 10px 0 8px;
+  }
+  .section { padding: 88px 0 0; }
+  .section > .wrap > p.lead { max-width: 62ch; color: var(--muted); margin-bottom: 34px; }
+
+  /* ── Hero ── */
+  .hero { padding: 12vh 0 72px; text-align: left; }
+  .hero .sig {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.3em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .hero h1 {
+    font-size: clamp(44px, 9vw, 104px);
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1.02;
+    margin: 14px 0 6px;
+    color: #EAF9FD;
+    text-shadow: 0 0 34px rgba(115, 242, 255, 0.28);
+  }
+  .hero h1 .craft { color: var(--cyan); }
+  .hero .tag {
+    font-size: clamp(17px, 2vw, 21px);
+    color: var(--text);
+    max-width: 58ch;
+    margin: 14px 0 8px;
+  }
+  .hero .sub { font-family: var(--mono); font-size: 13px; color: var(--muted); max-width: 70ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 34px; }
+  .btn {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    padding: 14px 26px;
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    background: rgba(115, 242, 255, 0.05);
+    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  }
+  .btn:hover { background: var(--cyan); color: #032028; box-shadow: 0 0 28px rgba(115,242,255,0.35); }
+  .btn.gold { border-color: var(--gold); color: var(--gold); background: rgba(255,196,92,0.05); }
+  .btn.gold:hover { background: var(--gold); color: #2A1A02; box-shadow: 0 0 28px rgba(255,196,92,0.3); }
+  .hero .factions {
+    display: flex; gap: 22px; margin-top: 42px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em;
+    color: var(--muted); text-transform: uppercase; flex-wrap: wrap;
+  }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; }
+
+  /* ── Feature grid ── */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; }
+  .feature h3 {
+    font-size: 16px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+    color: #EAF9FD; margin-bottom: 8px;
+  }
+  .feature h3 .k { color: var(--cyan); font-family: var(--mono); margin-right: 8px; }
+  .feature p { font-size: 14.5px; color: var(--muted); }
+  .feature p b { color: var(--text); font-weight: 600; }
+
+  /* ── Worlds ── */
+  .world { display: flex; gap: 22px; align-items: flex-start; }
+  .world .disc { flex: 0 0 84px; position: relative; height: 84px; margin-top: 4px; }
+  .disc .globe {
+    position: absolute; inset: 0; border-radius: 50%;
+  }
+  .korrath .globe { background: radial-gradient(circle at 32% 30%, #7A6A50, #4A3E2E 55%, #14202E 100%); box-shadow: 0 0 22px rgba(115,242,255,0.18); }
+  .vessa .globe { background: radial-gradient(circle at 32% 30%, #E8F1FA, #9FB8D0 55%, #1A2C42 100%); box-shadow: 0 0 22px rgba(169,207,255,0.25); }
+  .titanhold .globe { background: radial-gradient(circle at 32% 30%, #D9A45C, #8A6228 55%, #2E1F08 100%); box-shadow: 0 0 26px rgba(255,196,92,0.28); }
+  .titanhold .ring {
+    position: absolute; left: -20px; right: -20px; top: 50%; height: 30px;
+    transform: translateY(-50%) rotate(-14deg);
+    border: 2px solid rgba(255, 196, 92, 0.75);
+    border-radius: 50%;
+    border-top-color: transparent;
+  }
+  .world h3 { font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .world .wtag { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; }
+  .korrath  .wtag { color: var(--cyan); }
+  .vessa    .wtag { color: var(--ice); }
+  .titanhold .wtag { color: var(--gold); }
+  .world p { font-size: 14.5px; color: var(--muted); margin-top: 8px; }
+  .worlds-note { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 20px; max-width: 76ch; }
+  .worlds-note b { color: var(--cyan); font-weight: 600; }
+
+  /* ── Demo ── */
+  .demo-frame {
+    aspect-ratio: 16 / 9;
+    display: grid; place-items: center;
+    background:
+      repeating-linear-gradient(0deg, rgba(115,242,255,0.045) 0 1px, transparent 1px 44px),
+      repeating-linear-gradient(90deg, rgba(115,242,255,0.045) 0 1px, transparent 1px 44px),
+      radial-gradient(ellipse at center, #0B1626 0%, #050A14 75%);
+    border: 1px solid var(--line);
+  }
+  .demo-frame .msg { text-align: center; font-family: var(--mono); }
+  .demo-frame .msg .big {
+    font-size: clamp(16px, 2.6vw, 24px);
+    letter-spacing: 0.28em; text-transform: uppercase; color: var(--cyan);
+  }
+  .demo-frame .msg .big::after {
+    content: "▌"; animation: blink 1.1s steps(1) infinite; margin-left: 4px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .demo-frame .msg .small { font-size: 12px; color: var(--muted); margin-top: 12px; letter-spacing: 0.1em; }
+
+  .controls { margin-top: 22px; overflow-x: auto; }
+  .controls table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+  .controls th {
+    text-align: left; color: var(--cyan); letter-spacing: 0.2em; text-transform: uppercase;
+    font-size: 11px; padding: 10px 14px; border-bottom: 1px solid var(--line-hot);
+  }
+  .controls td { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+  .controls td:first-child { color: var(--text); white-space: nowrap; }
+
+  /* ── Download ── */
+  .dl-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  .dl {
+    text-align: center; padding: 26px 18px;
+    border: 1px dashed var(--line-hot);
+    color: var(--muted);
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .dl .plat { color: var(--text); font-size: 16px; display: block; margin-bottom: 6px; }
+  .dl .soon { color: var(--gold); font-size: 11px; letter-spacing: 0.28em; }
+  .source { margin-top: 18px; }
+  .source ol { margin: 12px 0 0 22px; color: var(--muted); font-size: 14.5px; }
+  .source ol li { margin-bottom: 6px; }
+  .source code {
+    font-family: var(--mono); font-size: 13px; color: var(--cyan);
+    background: rgba(115,242,255,0.07); padding: 2px 7px;
+  }
+
+  /* ── Stats ── */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .stat { text-align: center; padding: 22px 10px; }
+  .stat .n {
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    font-size: clamp(28px, 4vw, 42px); font-weight: 700; color: var(--cyan);
+    text-shadow: 0 0 18px rgba(115,242,255,0.35);
+  }
+  .stat .l {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--muted); margin-top: 6px;
+  }
+
+  /* ── Mission log (updates) ── */
+  .log { border-left: 1px solid var(--line-hot); margin-left: 8px; padding-left: 30px; display: grid; gap: 26px; }
+  .entry { position: relative; }
+  .entry::before {
+    content: ""; position: absolute; left: -35px; top: 8px;
+    width: 9px; height: 9px; background: var(--void);
+    border: 2px solid var(--cyan); transform: rotate(45deg);
+  }
+  .entry.old::before { border-color: var(--cyan-dim); }
+  .entry .stamp {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .entry .stamp .v { color: var(--cyan); }
+  .entry h3 { font-size: 16px; letter-spacing: 0.1em; text-transform: uppercase; margin: 4px 0; }
+  .entry p { font-size: 14.5px; color: var(--muted); max-width: 72ch; }
+
+  /* ── Roadmap ── */
+  .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+  .road .panel h3 { font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px; }
+  .road .panel p { font-size: 14px; color: var(--muted); }
+  .chip {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.26em; text-transform: uppercase;
+    padding: 3px 10px; margin-left: 8px; vertical-align: middle;
+  }
+  .chip.soon { color: var(--gold); border: 1px solid var(--gold); }
+  .chip.idea { color: var(--muted); border: 1px solid var(--line-hot); }
+
+  footer {
+    margin-top: 96px; padding: 34px 0 44px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    letter-spacing: 0.08em;
+  }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 30px; justify-content: space-between; }
+</style>
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+<main>
+
+  <!-- ═══ HERO ═══ -->
+  <header class="hero">
+    <div class="wrap">
+      <div class="sig">A fully procedural space game · zero art assets · one continuous system</div>
+      <h1>Starship<br><span class="craft">Craft</span></h1>
+      <p class="tag">Bolt a ship together block by block — then live with the physics you built.
+      Every thruster pushes from where you mounted it. Every world you dive into is a different storm.</p>
+      <p class="sub">You never die out here. But you can be stranded, and the wreck you limp home in is the one you designed.</p>
+      <div class="cta-row">
+        <a class="btn" href="#demo">Play the demo</a>
+        <a class="btn gold" href="#download">Download</a>
+        <a class="btn" style="border-color: var(--line-hot); color: var(--muted); background: none;" href="#updates">Mission log</a>
+      </div>
+      <div class="factions">
+        <span><span class="dot" style="background: var(--cyan);"></span>You</span>
+        <span><span class="dot" style="background: var(--green);"></span>Allies</span>
+        <span><span class="dot" style="background: var(--red);"></span>Hostiles</span>
+        <span><span class="dot" style="background: var(--gold);"></span>Titanhold's ring — do not touch</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══ FEATURES ═══ -->
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="eyebrow">Flight manual</div>
+      <h2>Your design is the physics</h2>
+      <p class="lead">No stat screens pretending to be engineering. The ship is one rigidbody
+      assembled from your blocks, and everything you feel in flight falls out of where you put them.</p>
+      <div class="grid">
+        <div class="panel feature">
+          <h3><span class="k">01</span>Build like a fort, fly like a brick</h3>
+          <p>Minecraft-style shipyard. Mass and center of gravity come from your blocks;
+          thrust is applied <b>at each engine's mounted position</b>. Hang both engines on one
+          side and the ship genuinely veers — the engineering panel and balance markers
+          tell you before launch.</p>
+        </div>
+        <div class="panel feature">
+          <h3><span class="k">02</span>Mk I / Mk II everything</h3>
+          <p>Hull, thrusters, RCS pods, guns, armor — each in two marks, where Mk II is
+          better <b>and cooler</b>: blue-burning bells, twin barrels, gyro rings. Armor soaks
+          up to five hits and scorches visibly as it fails.</p>
+        </div>
+        <div class="panel feature">
+          <h3><span class="k">03</span>You never die</h3>
+          <p>The core is indestructible. Lose every engine and you're <b>stranded</b>, not dead —
+          guns and RCS still answer, so hold the line as a drifting turret or respawn at the
+          carrier with your score intact. People find clever ways home.</p>
+        </div>
+        <div class="panel feature">
+          <h3><span class="k">04</span>One sky, many worlds</h3>
+          <p>All three planets hang in one continuous space — no loading screens, no map select.
+          Fly into a globe's cloud shell and you're <b>inside its weather</b>; climb back above
+          the clouds and you're in clean zero-g again.</p>
+        </div>
+        <div class="panel feature">
+          <h3><span class="k">05</span>Turbo, anchor, armor</h3>
+          <p><b>T</b> burns the engine heat pool for 320 m/s transits. <b>G</b> anchors you dead
+          still against gravity and gunfire — turret mode. <b>F</b> raises armor mode: every hit
+          lands on your plating until they break through it.</p>
+        </div>
+        <div class="panel feature">
+          <h3><span class="k">06</span>The carrier is home</h3>
+          <p>Launch from a capital ship with blinking beacons and a lit runway. Set down on
+          the pad under 6 m/s and press <b>E</b> to refit mid-sortie — the shipyard opens
+          without leaving the world.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ WORLDS ═══ -->
+  <section class="section" id="worlds">
+    <div class="wrap">
+      <div class="eyebrow">System chart</div>
+      <h2>Three worlds, three storms</h2>
+      <p class="lead">Punch through a cloud shell and the game hands you a different scene:
+      flat ground, looping horizon, that world's weather owning the sky.</p>
+      <div class="grid">
+        <div class="panel world korrath">
+          <div class="disc"><div class="globe"></div></div>
+          <div>
+            <h3>Korrath</h3>
+            <div class="wtag">Cloud banks · lightning</div>
+            <p>A rocky world ringed by an orbital rock belt. Inside: white fog, drifting
+            cloud towers, moss flats and dark ponds — and lightning deep in the deck.</p>
+          </div>
+        </div>
+        <div class="panel world vessa">
+          <div class="disc"><div class="globe"></div></div>
+          <div>
+            <h3>Vessa</h3>
+            <div class="wtag">Snow storm</div>
+            <p>The small ice world. Pale skies, flakes streaming past the canopy, frozen
+            lakes glinting between snow mounds. Quiet — until the radar isn't.</p>
+          </div>
+        </div>
+        <div class="panel world titanhold">
+          <div class="disc"><div class="globe"></div><div class="ring"></div></div>
+          <div>
+            <h3>Titanhold</h3>
+            <div class="wtag">Giant dust storm · deadly ring</div>
+            <p>The Saturn of the system. A four-band golden ring races around it with debris
+            streaming at 2 km/s — inside the band you lose a block twice a second. Below the
+            clouds: sand-gold murk down to wind-scoured flats.</p>
+          </div>
+        </div>
+      </div>
+      <p class="worlds-note">Every surface <b>loops</b> — hold your heading for three kilometers
+      and you arrive exactly where you started. Flat maps that play round: cheap to render,
+      impossible to fall off.</p>
+    </div>
+  </section>
+
+  <!-- ═══ DEMO ═══ -->
+  <section class="section" id="demo">
+    <div class="wrap">
+      <div class="eyebrow">Simulator</div>
+      <h2>Browser demo</h2>
+      <p class="lead">The game is WebGL-clean — no file I/O, no platform tricks — and the
+      browser build slots in here the moment it's exported.</p>
+      <div class="demo-frame" role="img" aria-label="Reserved frame for the playable WebGL demo">
+        <div class="msg">
+          <div class="big">WebGL build — docking soon</div>
+          <div class="small">unity 2020.3 · export via file → build settings → webgl</div>
+        </div>
+      </div>
+      <div class="panel controls">
+        <table>
+          <tr><th>Input</th><th>Action</th><th>Input</th><th>Action</th></tr>
+          <tr><td>W / S</td><td>Throttle</td><td>T</td><td>Turbo (watch the heat bar)</td></tr>
+          <tr><td>Mouse or A / D</td><td>Turn</td><td>G</td><td>Anchor lock — dead stop</td></tr>
+          <tr><td>Q / E</td><td>Roll</td><td>F</td><td>Armor mode</td></tr>
+          <tr><td>Shift / X</td><td>Boost / brake</td><td>M</td><td>3D system map</td></tr>
+          <tr><td>Space / LMB</td><td>Fire</td><td>E</td><td>Refit on the carrier pad</td></tr>
+          <tr><td>1 / 2 / 3</td><td>Chase / rear / free cam</td><td>R</td><td>Respawn when stranded</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ DOWNLOAD ═══ -->
+  <section class="section" id="download">
+    <div class="wrap">
+      <div class="eyebrow">Hangar</div>
+      <h2>Get the game</h2>
+      <p class="lead">Packaged builds are on the roadmap. Until then the source runs in
+      minutes — the entire game is seventeen C# files and one empty scene.</p>
+      <div class="dl-row">
+        <div class="dl"><span class="plat">macOS</span><span class="soon">— docking soon —</span></div>
+        <div class="dl"><span class="plat">Windows</span><span class="soon">— docking soon —</span></div>
+        <div class="dl"><span class="plat">WebGL</span><span class="soon">— docking soon —</span></div>
+      </div>
+      <div class="panel source">
+        <div class="eyebrow">Build from source — the real download</div>
+        <ol>
+          <li>Clone the repo and open it in <code>Unity 2020.3.16f1</code>.</li>
+          <li>Open an empty scene. Delete everything in it.</li>
+          <li>Create one empty GameObject named <code>GameManager</code> and add the <code>GameManager</code> script.</li>
+          <li>Press <b>Play</b>. The menu, carrier, worlds, and everything else generate at runtime.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ STATS ═══ -->
+  <section class="section" id="stats">
+    <div class="wrap">
+      <div class="eyebrow">Telemetry</div>
+      <h2>By the numbers</h2>
+      <div class="stats">
+        <div class="panel stat"><div class="n">0</div><div class="l">art assets</div></div>
+        <div class="panel stat"><div class="n">17</div><div class="l">C# scripts</div></div>
+        <div class="panel stat"><div class="n">3,480</div><div class="l">lines of code</div></div>
+        <div class="panel stat"><div class="n">29</div><div class="l">automated checks</div></div>
+        <div class="panel stat"><div class="n">3</div><div class="l">worlds, one sky</div></div>
+        <div class="panel stat"><div class="n">320</div><div class="l">m/s at full turbo</div></div>
+        <div class="panel stat"><div class="n">1,200</div><div class="l">stars in the field</div></div>
+        <div class="panel stat"><div class="n">900</div><div class="l">pts per gunship</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ UPDATES ═══ -->
+  <section class="section" id="updates">
+    <div class="wrap">
+      <div class="eyebrow">Mission log</div>
+      <h2>Updates</h2>
+      <p class="lead">Development moves fast — every entry below shipped playable.</p>
+      <div class="log">
+        <div class="entry">
+          <div class="stamp"><span class="v">v0.7</span> · 2026-08-15 · latest</div>
+          <h3>The Living System</h3>
+          <p>A blazing sun with halo, rotating globes with drifting cloud shells, carrier nav
+          beacons and runway chevrons, per-world surface dressing, lightning on Korrath,
+          armored gunships worth 900, shipyard engineering panel with balance markers,
+          title cards on every transition.</p>
+        </div>
+        <div class="entry">
+          <div class="stamp"><span class="v">v0.6</span> · 2026-08-14</div>
+          <h3>One Sky</h3>
+          <p>No Man's Sky-style scene swaps: globes in space are doors, surfaces are flat
+          looping worlds with their own weather — dust storm, cloud banks, snow storm.
+          Space went pure zero-g.</p>
+        </div>
+        <div class="entry old">
+          <div class="stamp"><span class="v">v0.5</span> · 2026-08-12</div>
+          <h3>Saturn</h3>
+          <p>Titanhold: the golden four-band ring with racing debris — beautiful, lethal —
+          plus dust storms and the butterscotch globe.</p>
+        </div>
+        <div class="entry old">
+          <div class="stamp"><span class="v">v0.4</span> · 2026-08-10</div>
+          <h3>Gravity 2.0</h3>
+          <p>Cloud-layer gravity replaced orbital mechanics. Turbo with per-engine heat pools,
+          the carrier with mid-sortie refits, the 3D system map, three camera modes.</p>
+        </div>
+        <div class="entry old">
+          <div class="stamp"><span class="v">v0.3</span> · 2026-08-08</div>
+          <h3>Marks &amp; Armor</h3>
+          <p>Mk I/II across every component, armor blocks with hit points, anchor lock,
+          armor mode, and the hard rule: you never die — only stranded.</p>
+        </div>
+        <div class="entry old">
+          <div class="stamp"><span class="v">v0.2</span> · 2026-08-06</div>
+          <h3>Shipyard</h3>
+          <p>The block builder: face-raycast placement, convex hull physics,
+          thrust-at-position dynamics, friend-and-foe NPCs, the radar, difficulty settings.</p>
+        </div>
+        <div class="entry old">
+          <div class="stamp"><span class="v">v0.1</span> · 2026-08-04</div>
+          <h3>First Light</h3>
+          <p>A dart ship, a field of splitting asteroids, and a score counter. Everything
+          else grew from here.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ ROADMAP ═══ -->
+  <section class="section" id="roadmap">
+    <div class="wrap">
+      <div class="eyebrow">Nav computer</div>
+      <h2>Where this is heading</h2>
+      <div class="road">
+        <div class="panel">
+          <h3>Multiplayer<span class="chip soon">coming soon</span></h3>
+          <p>The button is already on the menu. Blueprints are plain grid data and the world
+          is deterministic — built to bolt netcode on without a rewrite.</p>
+        </div>
+        <div class="panel">
+          <h3>Mk III abilities<span class="chip idea">exploring</span></h3>
+          <p>Higher marks stop being stat bumps: RCS flip-dodges, thruster micro-jumps,
+          charge shots, reactive armor bursts. Every component gets a trick.</p>
+        </div>
+        <div class="panel">
+          <h3>Packaged builds<span class="chip idea">exploring</span></h3>
+          <p>WebGL demo hosted right on this page, notarized desktop builds in the hangar
+          above, and blueprint sharing between pilots.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <span>STARSHIP CRAFT · tentative site — everything subject to change</span>
+      <span>Made with Unity 2020.3 · 100% generated at runtime · no art assets were harmed</span>
+    </div>
+  </footer>
+</main>
+
+<script>
+  // Starfield: slow-drifting, faintly twinkling — static under reduced motion.
+  (function () {
+    var cv = document.getElementById("stars");
+    var cx = cv.getContext("2d");
+    var stars = [];
+    var still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function size() {
+      cv.width = innerWidth;
+      cv.height = innerHeight;
+      stars = [];
+      var n = Math.floor(cv.width * cv.height / 5200);
+      for (var i = 0; i < n; i++)
+        stars.push({
+          x: Math.random() * cv.width,
+          y: Math.random() * cv.height,
+          r: Math.random() * 1.3 + 0.2,
+          tw: Math.random() * Math.PI * 2,
+          hue: Math.random() < 0.12 ? "255,196,92" : "201,228,236"
+        });
+      if (still) draw(0);
+    }
+
+    function draw(t) {
+      cx.clearRect(0, 0, cv.width, cv.height);
+      for (var i = 0; i < stars.length; i++) {
+        var s = stars[i];
+        var a = still ? 0.7 : 0.45 + 0.4 * Math.sin(t / 1400 + s.tw);
+        cx.fillStyle = "rgba(" + s.hue + "," + (a * s.r / 1.5) + ")";
+        cx.fillRect(s.x, s.y, s.r, s.r);
+        if (!still) {
+          s.x -= s.r * 0.016;
+          if (s.x < 0) s.x = cv.width;
+        }
+      }
+      if (!still) requestAnimationFrame(draw);
+    }
+
+    addEventListener("resize", size);
+    size();
+    if (!still) requestAnimationFrame(draw);
+  })();
+</script>
+</body>
+</html>

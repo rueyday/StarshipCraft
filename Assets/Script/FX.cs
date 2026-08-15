@@ -305,6 +305,29 @@ public static class FX
         return ps;
     }
 
+    // Continuous sparks + smoke leaking from a damaged block.
+    public static ParticleSystem DamageSparks(Transform parent)
+    {
+        var ps = NewSystem("DamageSparks", parent, Vector3.zero);
+        var main = ps.main;
+        main.startLifetime   = new ParticleSystem.MinMaxCurve(0.3f, 0.8f);
+        main.startSpeed      = new ParticleSystem.MinMaxCurve(1f, 3f);
+        main.startSize       = new ParticleSystem.MinMaxCurve(0.08f, 0.22f);
+        main.startColor      = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 0.6f, 0.15f), new Color(0.5f, 0.5f, 0.5f, 0.5f));
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.maxParticles    = 40;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Sphere;
+        shape.radius    = 0.45f;
+
+        var em = ps.emission;
+        em.enabled = true;
+        em.rateOverTime = 9f;
+        return ps;
+    }
+
     // Huge soft cloud banks drifting around the ship (Korrath's sky).
     public static ParticleSystem CloudPuffs()
     {

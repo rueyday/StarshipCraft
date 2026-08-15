@@ -15,6 +15,7 @@ public class ShipBuilder : MonoBehaviour
     readonly Dictionary<Vector3Int, GameObject> objs = new Dictionary<Vector3Int, GameObject>();
     GameObject ghost;
     Material ghostMat;
+    GameObject comMarker, thrustMarker;
     float yaw = 35f, pitch = 18f, dist = 9f;
     float pulseT;
 
@@ -30,6 +31,45 @@ public class ShipBuilder : MonoBehaviour
         ghostMat = FX.Ghost(new Color(0.3f, 0.9f, 1f, 0.35f));
         ghost.AddComponent<MeshRenderer>().material = ghostMat;
         ghost.SetActive(false);
+
+        // Balance gizmos: yellow = center of mass, orange = thrust centroid.
+        // Line them up (in X/Y) and the ship flies straight under power.
+        comMarker    = Marker(new Color(1f, 0.9f, 0.2f));
+        thrustMarker = Marker(new Color(1f, 0.5f, 0.1f));
+    }
+
+    GameObject Marker(Color c)
+    {
+        var m = new GameObject("Marker");
+        m.transform.SetParent(transform, false);
+        m.transform.localScale = Vector3.one * 0.34f;
+        m.AddComponent<MeshFilter>().mesh = MeshFactory.CreateSphereMesh();
+        m.AddComponent<MeshRenderer>().material = FX.Standard(Color.black, c * 2.2f, 0f, 0.5f);
+        return m;
+    }
+
+    void UpdateMarkers()
+    {
+        float mass = 0f, thrust = 0f;
+        Vector3 com = Vector3.zero, tc = Vector3.zero;
+        foreach (var kv in Blueprint.Blocks)
+        {
+            float m = ShipBlueprint.MassOf(kv.Value);
+            mass += m;
+            com += (Vector3)kv.Key * m;
+            if (kv.Value.type == BlockType.Thruster)
+            {
+                float t = ShipBlueprint.ThrustMult(kv.Value);
+                thrust += t;
+                tc += (Vector3)kv.Key * t;
+            }
+        }
+        com /= mass;
+        comMarker.transform.localPosition = com + Vector3.up * 0.02f;
+        thrustMarker.SetActive(thrust > 0f);
+        if (thrust > 0f)
+            thrustMarker.transform.localPosition =
+                new Vector3(tc.x / thrust, tc.y / thrust, com.z) + Vector3.up * 0.02f;
     }
 
     void CreateObj(Vector3Int pos, BlockDef def, bool animate)
@@ -87,6 +127,8 @@ public class ShipBuilder : MonoBehaviour
         var rot = Quaternion.Euler(pitch, yaw, 0f);
         cam.transform.position = rot * new Vector3(0f, 0f, -dist);
         cam.transform.rotation = rot;
+
+        UpdateMarkers();
 
         // ── Aim + place/remove ──
         ghost.SetActive(false);

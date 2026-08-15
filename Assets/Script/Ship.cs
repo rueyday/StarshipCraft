@@ -26,6 +26,7 @@ public class Ship : MonoBehaviour
     [HideInInspector] public bool    Boost;
     [HideInInspector] public bool    Brake;
     [HideInInspector] public bool    Turbo;        // hold to burn heat for raw speed
+    [HideInInspector] public int     scoreValue = 500; // bounty paid when destroyed
 
     const float ThrustPerBlock = 220f;
     const float BoostMult      = 1.9f;
@@ -180,7 +181,9 @@ public class Ship : MonoBehaviour
                 coreRend = rend;
                 break;
             case BlockType.Thruster:
-                flames.Add(FX.EngineFlame(go.transform, Vector3.back * 0.95f, FX.Accent(faction)));
+                // Mk II engines burn blue-hot; Mk I keep the faction tint.
+                flames.Add(FX.EngineFlame(go.transform, Vector3.back * 0.95f,
+                    def.mk == 2 ? new Color(0.45f, 0.8f, 1f) : FX.Accent(faction)));
                 break;
             case BlockType.Steering:
                 rcsJets.Add(FX.RcsPuff(go.transform, FX.Accent(faction)));
@@ -293,7 +296,7 @@ public class Ship : MonoBehaviour
             if (speed > 30f) TakeHit(point); // brutal impacts cost two blocks
             FX.Explosion(point, new Color(1f, 0.7f, 0.3f), 0.6f);
         }
-        else if (speed > 3f && col.collider.GetComponent<Planet>() != null)
+        else if (speed > 3f && col.collider.attachedRigidbody == null)
         {
             FX.Impact(point, new Color(0.65f, 0.55f, 0.4f)); // touchdown dust
         }
@@ -381,7 +384,8 @@ public class Ship : MonoBehaviour
         hp[nearest]--;
         if (hp[nearest] > 0)
         {
-            // Damaged but holding: sparks + progressively scorched body.
+            // Damaged but holding: sparks + progressively scorched body, and
+            // the wound keeps leaking sparks and smoke until the block dies.
             FX.Impact(worldPoint, new Color(1f, 0.75f, 0.4f));
             if (bodyRends.TryGetValue(nearest, out var rend) && rend != null)
             {
@@ -390,6 +394,9 @@ public class Ship : MonoBehaviour
                 mpb.SetColor("_Color", rend.sharedMaterial.color * Mathf.Lerp(0.3f, 1f, frac));
                 rend.SetPropertyBlock(mpb);
             }
+            if (blockObjs.TryGetValue(nearest, out var wounded) && wounded != null &&
+                wounded.transform.Find("DamageSparks") == null)
+                FX.DamageSparks(wounded.transform);
             if (faction == Faction.Player && GameManager.Instance != null)
                 GameManager.Instance.CameraShake(0.25f);
             return;

@@ -6,6 +6,8 @@ public static class GameSettings
     public static int   enemyCount    = 2;    // hostile NPC ships kept alive
     public static int   allyCount     = 1;    // friendly NPC ships kept alive
     public static float npcSkill      = 1f;   // multiplies NPC turn rate, thrust and fire rate
+    public static float mouseSens     = 0.55f;
+    public static bool  invertY       = false;
 
     public static void ApplyEasy()
     {

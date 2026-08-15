@@ -43,7 +43,54 @@ public class Carrier : MonoBehaviour
         light.color = cyan;
         light.range = 70f;
         light.intensity = 1.6f;
+
+        // Runway chevrons marching down the deck toward the refit pad.
+        Material chevron = FX.Standard(Color.black, cyan * 0.7f, 0f, 0.5f);
+        for (int z = -70; z <= 30; z += 20)
+            c.Box("Chevron", new Vector3(0f, 8.05f, z), new Vector3(20f, 0.15f, 1.6f), chevron, false);
+
+        // Engine cluster at the stern: three bells with glowing blue cores.
+        Material bell = FX.Standard(new Color(0.12f, 0.13f, 0.16f), Color.black, 0.8f, 0.5f);
+        Material core = FX.Standard(Color.black, new Color(0.45f, 0.7f, 1f) * 2f, 0f, 0.5f);
+        for (int i = -1; i <= 1; i++)
+        {
+            Vector3 basePos = new Vector3(i * 10f, 0f, -86f);
+            c.Cone("EngineBell", basePos, Vector3.back, 3.2f, 4.6f, 7f, bell);
+            c.Cone("EngineCore", basePos + new Vector3(0f, 0f, -6.5f), Vector3.back, 3.6f, 3.6f, 0.5f, core);
+        }
+
+        // Antenna masts on the tower.
+        c.Box("Mast1", new Vector3(14f, 32f, -34f), new Vector3(0.4f, 12f, 0.4f), hull, false);
+        c.Box("Mast2", new Vector3(11f, 29f, -20f), new Vector3(0.3f, 7f, 0.3f), hull, false);
+
+        // Blinking navigation beacons: bow (green), stern (red), mast (cyan).
+        c.Beacon(new Vector3(0f, 3f, 98f), new Color(0.3f, 1f, 0.4f), 0f);
+        c.Beacon(new Vector3(0f, 2f, -88f), new Color(1f, 0.35f, 0.3f), 0.5f);
+        c.Beacon(new Vector3(14f, 39f, -34f), cyan, 0.25f);
         return c;
+    }
+
+    void Cone(string coneName, Vector3 localPos, Vector3 dir, float r0, float r1, float len, Material mat)
+    {
+        var g = new GameObject(coneName);
+        g.transform.SetParent(transform, false);
+        g.transform.localPosition = localPos;
+        g.transform.localRotation = Quaternion.LookRotation(dir);
+        g.AddComponent<MeshFilter>().mesh = MeshFactory.CreateCone(r0, r1, len, 14);
+        g.AddComponent<MeshRenderer>().material = mat;
+    }
+
+    void Beacon(Vector3 localPos, Color color, float phase)
+    {
+        var b = new GameObject("Beacon");
+        b.transform.SetParent(transform, false);
+        b.transform.localPosition = localPos;
+        var l = b.AddComponent<Light>();
+        l.type = LightType.Point;
+        l.color = color;
+        l.range = 26f;
+        var blink = b.AddComponent<BlinkLight>();
+        blink.phase = phase;
     }
 
     void Box(string boxName, Vector3 localPos, Vector3 size, Material mat, bool collider = true)
@@ -55,6 +102,18 @@ public class Carrier : MonoBehaviour
         b.AddComponent<MeshFilter>().mesh = MeshFactory.CubeMesh();
         b.AddComponent<MeshRenderer>().material = mat;
         if (collider) b.AddComponent<BoxCollider>();
+    }
+
+    public class BlinkLight : MonoBehaviour
+    {
+        public float phase;
+        Light l;
+        void Awake() => l = GetComponent<Light>();
+        void Update()
+        {
+            if (l != null)
+                l.intensity = Mathf.Repeat(Time.time * 0.8f + phase, 1f) < 0.15f ? 2.2f : 0.05f;
+        }
     }
 
     // True when a ship is parked on the refit pad slowly enough to service.
