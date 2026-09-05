@@ -19,6 +19,8 @@ public class Asteroid : MonoBehaviour
     // scored=true when a player bullet did the damage.
     public void Hit(bool scored)
     {
+        SFX.Play(SFX.Id.Boom, transform.position, 0.7f,
+                 Size == AsteroidSize.Large ? 0.8f : Size == AsteroidSize.Medium ? 1f : 1.25f);
         if (GameManager.Instance != null)
             GameManager.Instance.OnAsteroidDestroyed(this, scored);
         Destroy(gameObject);
@@ -34,6 +36,9 @@ public class Asteroid : MonoBehaviour
         // with care. A real ram smashes a block and shatters the rock.
         if (col.relativeVelocity.magnitude < 6f) return;
 
+        if (GameManager.Instance != null && ship == GameManager.Instance.PlayerShip)
+            GameManager.Instance.OnPlayerDamaged(
+                (transform.position - ship.transform.position).normalized);
         ship.TakeHit(col.GetContact(0).point);
         FX.Explosion(col.GetContact(0).point, new Color(0.9f, 0.7f, 0.4f), 0.7f);
         Hit(false);

@@ -377,6 +377,39 @@ public static class FX
         return ps;
     }
 
+    // Glowing embers rising off the ground with drifting ash (Emberfall's
+    // sky). The caller aims the system's +Z along local "up" each frame.
+    public static ParticleSystem EmberStorm()
+    {
+        var ps = NewSystem("EmberStorm", null, Vector3.zero);
+        var main = ps.main;
+        main.startLifetime   = new ParticleSystem.MinMaxCurve(1.6f, 3.2f);
+        main.startSpeed      = new ParticleSystem.MinMaxCurve(4f, 10f);
+        main.startSize       = new ParticleSystem.MinMaxCurve(0.12f, 0.45f);
+        main.startColor      = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 0.55f, 0.1f), new Color(0.7f, 0.25f, 0.05f, 0.7f));
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.maxParticles    = 900;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Cone;
+        shape.angle     = 32f;
+        shape.radius    = 85f;
+
+        var col = ps.colorOverLifetime;
+        col.enabled = true;
+        var g = new Gradient();
+        g.SetKeys(
+            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(new Color(0.9f, 0.35f, 0.05f), 0.5f) },
+            new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(0f, 1f) });
+        col.color = g;
+
+        var em = ps.emission;
+        em.enabled = true;
+        em.rateOverTime = 0f;
+        return ps;
+    }
+
     // Static field of glowing star particles surrounding the play area.
     public static void Starfield(Transform parent)
     {

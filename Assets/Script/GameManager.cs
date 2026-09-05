@@ -7,7 +7,7 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    enum State { Menu, Settings, Build, Playing }
+    enum State { Menu, Settings, Multiplayer, Build, Playing }
     State state = State.Menu;
 
     // Hard rule: the player never dies. With every engine gone the ship is
@@ -37,6 +37,63 @@ public class GameManager : MonoBehaviour
     Vector3 entryDir = Vector3.forward;
     Vector3 sunDir = Vector3.down;
 
+    // Deep-space landmarks (asteroid fields, the wreck) for radar and map.
+    struct Poi { public string name; public Vector3 pos; }
+    readonly List<Poi> pois = new List<Poi>();
+
+    // A drifting cluster of destructible rocks. wreck=true also scatters the
+    // hull of a broken capital ship through the middle, beacon still blinking.
+    void CreateAsteroidField(string fieldName, Vector3 center, float radius, int count, bool wreck)
+    {
+        var root = new GameObject(fieldName);
+        root.transform.SetParent(spaceRoot, false);
+        root.transform.position = center;
+
+        for (int i = 0; i < count; i++)
+        {
+            float size = Random.Range(3f, 14f);
+            float kind = Random.value;
+            var rock = new GameObject("FieldRock");
+            rock.transform.SetParent(root.transform, false);
+            rock.transform.localPosition = Random.insideUnitSphere * radius;
+            rock.transform.localRotation = Random.rotation;
+            rock.AddComponent<MeshFilter>().mesh =
+                MeshFactory.CreateAsteroidMesh(Random.Range(0, 9999), size);
+            rock.AddComponent<MeshRenderer>().material =
+                kind < 0.6f  ? FX.Standard(new Color(0.45f, 0.4f, 0.38f), Color.black, 0.1f, 0.35f)
+              : kind < 0.85f ? FX.Standard(new Color(0.68f, 0.76f, 0.84f), Color.black, 0.15f, 0.8f)
+                             : FX.Standard(new Color(0.35f, 0.32f, 0.3f), Color.black, 0.95f, 0.75f);
+            rock.AddComponent<SphereCollider>().radius = size * 0.85f;
+            rock.AddComponent<Asteroid>().Size = Asteroid.AsteroidSize.Large;
+        }
+
+        if (wreck)
+        {
+            Material scrap = FX.Standard(new Color(0.2f, 0.21f, 0.24f), Color.black, 0.8f, 0.4f);
+            for (int i = 0; i < 9; i++)
+            {
+                var piece = new GameObject("WreckPiece");
+                piece.transform.SetParent(root.transform, false);
+                piece.transform.localPosition = Random.insideUnitSphere * 90f;
+                piece.transform.localRotation = Random.rotation;
+                piece.transform.localScale = new Vector3(
+                    Random.Range(3f, 9f), Random.Range(1.5f, 4f), Random.Range(6f, 26f));
+                piece.AddComponent<MeshFilter>().mesh = MeshFactory.CubeMesh();
+                piece.AddComponent<MeshRenderer>().material = scrap;
+                piece.AddComponent<BoxCollider>();
+            }
+            var beacon = new GameObject("DistressBeacon");
+            beacon.transform.SetParent(root.transform, false);
+            var l = beacon.AddComponent<Light>();
+            l.type = LightType.Point;
+            l.color = new Color(1f, 0.3f, 0.25f);
+            l.range = 120f;
+            beacon.AddComponent<Carrier.BlinkLight>().phase = 0.3f;
+        }
+
+        pois.Add(new Poi { name = fieldName.ToUpper(), pos = center });
+    }
+
     // Big fading title cards ("ENTERING KORRATH — CLOUD BANKS").
     string announceText = "";
     float announceT;
@@ -44,10 +101,36 @@ public class GameManager : MonoBehaviour
 
     void Announce(string msg) { announceText = msg; announceT = 4f; }
 
+    // Combat-feel feedback + shipyard toast + multiplayer glue.
+    float hitMarkT, dmgT;
+    Vector3 dmgDir = Vector3.forward;
+    string builderToast = "";
+    float toastT;
+    string joinIp = "192.168.1.";
+
+    // Which slice of the universe the player occupies (for crew zone-matching).
+    public string ZoneName => currentPlanet == null ? "SPACE" : currentPlanet.name;
+
+    public void OnPlayerHitConfirm()
+    {
+        hitMarkT = 0.22f;
+        SFX.Ui(SFX.Id.Confirm, 0.45f);
+    }
+
+    public void OnPlayerDamaged(Vector3 towardAttacker)
+    {
+        if (towardAttacker.sqrMagnitude < 0.01f) return;
+        dmgDir = towardAttacker.normalized;
+        dmgT = 1.2f;
+    }
+
+    public void BuilderToast(string msg) { builderToast = msg; toastT = 2.5f; }
+
     static string WeatherLabel(WeatherKind k) =>
         k == WeatherKind.Dust ? "GIANT DUST STORM"
         : k == WeatherKind.Snow ? "SNOW STORM"
-        : k == WeatherKind.Cloud ? "CLOUD BANKS" : "";
+        : k == WeatherKind.Cloud ? "CLOUD BANKS"
+        : k == WeatherKind.Ember ? "ASH & EMBER STORM" : "";
     int score;
     float playTime;
     float asteroidTimer, enemyTimer, allyTimer;
@@ -64,6 +147,8 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
+        Application.targetFrameRate = 60; // phones default to 30
+
         cam = Camera.main;
         if (cam == null)
         {
@@ -73,7 +158,7 @@ public class GameManager : MonoBehaviour
         }
         cam.clearFlags      = CameraClearFlags.SolidColor;
         cam.backgroundColor = new Color(0.01f, 0.015f, 0.045f);
-        cam.farClipPlane    = 34000f; // planets + Titanhold's full ring stay visible
+        cam.farClipPlane    = 48000f; // the whole widened system stays visible
 
         RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
         RenderSettings.ambientLight = new Color(0.18f, 0.2f, 0.28f);
@@ -100,28 +185,45 @@ public class GameManager : MonoBehaviour
         {
             new PlanetDef
             {
-                name = "Korrath", spacePos = new Vector3(0f, -1400f, 3400f), radius = 1400f,
+                name = "Korrath", spacePos = new Vector3(0f, -1600f, 5200f), radius = 1400f,
                 land = new Color(0.4f, 0.34f, 0.26f), ocean = new Color(0.08f, 0.28f, 0.5f),
                 ground = new Color(0.35f, 0.3f, 0.23f), hasOcean = true, hasBelt = true,
                 weather = WeatherKind.Cloud, radarColor = new Color(0.45f, 0.65f, 1f),
+                loopSize = 6000f,
             },
             new PlanetDef
             {
-                name = "Vessa", spacePos = new Vector3(-5200f, 900f, -3800f), radius = 650f,
+                name = "Vessa", spacePos = new Vector3(-8500f, 1600f, -6000f), radius = 650f,
                 land = new Color(0.75f, 0.8f, 0.85f), ocean = new Color(0.5f, 0.65f, 0.8f),
                 ground = new Color(0.72f, 0.78f, 0.85f), hasOcean = true,
                 weather = WeatherKind.Snow, radarColor = new Color(0.6f, 0.8f, 1f),
+                loopSize = 4000f,
             },
             new PlanetDef
             {
-                name = "Titanhold", spacePos = new Vector3(16000f, -1200f, 2500f), radius = 3500f,
+                name = "Titanhold", spacePos = new Vector3(20000f, -1500f, 3000f), radius = 3500f,
                 land = new Color(0.62f, 0.45f, 0.22f),
                 ground = new Color(0.55f, 0.4f, 0.22f), hasRing = true,
                 weather = WeatherKind.Dust, radarColor = new Color(1f, 0.75f, 0.3f),
+                loopSize = 9000f,
+            },
+            new PlanetDef
+            {
+                name = "Emberfall", spacePos = new Vector3(-15000f, -2600f, 10500f), radius = 1000f,
+                land = new Color(0.3f, 0.14f, 0.1f),
+                ground = new Color(0.13f, 0.1f, 0.09f),
+                weather = WeatherKind.Ember, radarColor = new Color(1f, 0.45f, 0.25f),
+                loopSize = 5000f,
             },
         };
         foreach (var def in planetDefs)
             SpacePlanet.Create(def).transform.SetParent(spaceRoot, true);
+
+        // Deep-space points of interest — landmarks (and cover) on the long
+        // hauls between worlds. The Graveyard hides a wrecked capital ship.
+        CreateAsteroidField("Shatter Field", new Vector3(7500f, 600f, -2500f), 700f, 42, false);
+        CreateAsteroidField("The Spindle", new Vector3(-4500f, -900f, 8500f), 550f, 30, false);
+        CreateAsteroidField("The Graveyard", new Vector3(9500f, -2200f, 9500f), 850f, 48, true);
 
         // The star itself: a blazing disc with a soft halo, hung where the
         // directional light actually comes from.
@@ -144,18 +246,35 @@ public class GameManager : MonoBehaviour
         foreach (var def in planetDefs) mapCenter += def.spacePos;
         mapCenter /= planetDefs.Length + 1; // + carrier at origin
 
-        blueprint = DefaultPlayerBlueprint();
+        new GameObject("NetLink").AddComponent<NetLink>();
+
+        // Your last design survives between sessions (same codec the network
+        // and clipboard sharing use).
+        var saved = NetCodec.Decode(PlayerPrefs.GetString("ship", ""));
+        blueprint = saved != null && saved.Blocks.Count > 1 ? saved : DefaultPlayerBlueprint();
     }
 
     void Update()
     {
         if (starfieldRoot != null) starfieldRoot.position = cam.transform.position;
         if (announceT > 0f) announceT -= Time.deltaTime;
+        if (hitMarkT > 0f) hitMarkT -= Time.deltaTime;
+        if (dmgT > 0f) dmgT -= Time.deltaTime;
+        if (toastT > 0f) toastT -= Time.deltaTime;
+
+        TouchControls.ShipyardMode = state == State.Build;
+        TouchControls.Poll();
+        if (TouchControls.MapTap)
+        {
+            TouchControls.MapTap = false;
+            if (state == State.Playing) ToggleMap();
+        }
 
         switch (state)
         {
             case State.Menu:
             case State.Settings:
+            case State.Multiplayer:
                 // Cinematic drift around the carrier while the menus are up.
                 menuAngle += Time.deltaTime * 4f;
                 var mrot = Quaternion.Euler(10f, menuAngle, 0f);
@@ -225,6 +344,14 @@ public class GameManager : MonoBehaviour
         Cursor.visible = false;
         state = State.Playing;
         Announce("ALL SYSTEMS ONLINE — GOOD HUNTING");
+        SFX.Ui(SFX.Id.Warp, 0.8f);
+
+        // Persist the design and tell the crew what we're flying.
+        string code = NetCodec.Encode(blueprint);
+        PlayerPrefs.SetString("ship", code);
+        PlayerPrefs.Save();
+        if (NetLink.Instance != null && NetLink.Instance.Active)
+            NetLink.Instance.Session.SetLocalShipCode(code);
     }
 
     void ClearWorld()
@@ -284,6 +411,7 @@ public class GameManager : MonoBehaviour
 
         SnapCamera();
         FX.Flash(PlayerShip.transform.position, Color.white, 5f, 0.5f);
+        SFX.Ui(SFX.Id.Warp, 1f, 1.1f);
         Announce($"ENTERING {def.name.ToUpper()} — {WeatherLabel(def.weather)}");
     }
 
@@ -306,6 +434,7 @@ public class GameManager : MonoBehaviour
 
         SnapCamera();
         FX.Flash(PlayerShip.transform.position, Color.white, 5f, 0.5f);
+        SFX.Ui(SFX.Id.Warp, 1f, 0.9f);
         Announce($"LEAVING {def.name.ToUpper()} — OPEN SPACE");
     }
 
@@ -501,6 +630,7 @@ public class GameManager : MonoBehaviour
     public void OnPlayerStranded()
     {
         CameraShake(1.5f);
+        SFX.Ui(SFX.Id.Hurt, 1f, 0.65f);
         Announce("STRANDED — ALL ENGINES LOST");
     }
 
@@ -561,7 +691,7 @@ public class GameManager : MonoBehaviour
             mapYaw += Input.GetAxis("Mouse X") * 3f;
             mapPitch = Mathf.Clamp(mapPitch - Input.GetAxis("Mouse Y") * 3f, 10f, 85f);
         }
-        mapDist = Mathf.Clamp(mapDist - Input.GetAxis("Mouse ScrollWheel") * 4000f, 2500f, 30000f);
+        mapDist = Mathf.Clamp(mapDist - Input.GetAxis("Mouse ScrollWheel") * 5000f, 2500f, 45000f);
         var rot = Quaternion.Euler(mapPitch, mapYaw, 0f);
         Vector3 center = currentPlanet == null || surface == null
             ? mapCenter
@@ -649,7 +779,7 @@ public class GameManager : MonoBehaviour
 
     // 3D system map (M or click the radar): orbits the real scene from afar.
     bool mapView;
-    float mapYaw = 30f, mapPitch = 55f, mapDist = 9000f;
+    float mapYaw = 30f, mapPitch = 55f, mapDist = 16000f;
     Vector3 mapCenter;
 
     // Free cam and the map both steal WASD/mouse from the ship.
@@ -682,18 +812,30 @@ public class GameManager : MonoBehaviour
 
     void Panel(Rect r) => GUI.DrawTexture(r, boxTex);
 
+    float uiScale = 1f;
+
     void OnGUI()
     {
         BuildStyles();
-        float sw = Screen.width, sh = Screen.height;
+        // One scale factor keeps the HUD legible on 4K monitors and phones;
+        // GUI.matrix also remaps IMGUI event coordinates, so buttons still work.
+        uiScale = TouchControls.Enabled
+            ? Mathf.Max(1f, Mathf.Min(Screen.width, Screen.height) / 480f)
+            : Mathf.Max(1f, Screen.height / 1400f);
+        GUI.matrix = Matrix4x4.Scale(new Vector3(uiScale, uiScale, 1f));
+        float sw = Screen.width / uiScale, sh = Screen.height / uiScale;
 
         switch (state)
         {
-            case State.Menu:     GuiMenu(sw, sh); break;
-            case State.Settings: GuiSettings(sw, sh); break;
-            case State.Build:    GuiBuild(sw, sh); break;
-            case State.Playing:  GuiPlaying(sw, sh); break;
+            case State.Menu:        GuiMenu(sw, sh); break;
+            case State.Settings:    GuiSettings(sw, sh); break;
+            case State.Multiplayer: GuiMultiplayer(sw, sh); break;
+            case State.Build:       GuiBuild(sw, sh); break;
+            case State.Playing:     GuiPlaying(sw, sh); break;
         }
+
+        if (state == State.Playing || state == State.Build)
+            TouchControls.Draw(uiScale, state == State.Playing && !mapView);
 
         // Title card: fades in the last second of its life.
         if (state == State.Playing && announceT > 0f && announceText.Length > 0)
@@ -718,25 +860,80 @@ public class GameManager : MonoBehaviour
         GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 95, 600, 75),
             "Build a block ship. Balance your engines. Survive the belt.", sMed);
 
-        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 - 25, 220, 48), "SINGLE PLAYER", sBtn)) EnterBuild(true);
-        GUI.enabled = false;
-        GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 32, 220, 48), "MULTIPLAYER — SOON", sBtn);
-        GUI.enabled = true;
-        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 89, 220, 48), "SETTINGS", sBtn)) state = State.Settings;
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 - 25, 220, 48), "SINGLE PLAYER", sBtn))
+        { SFX.Ui(SFX.Id.Click); EnterBuild(true); }
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 32, 220, 48), "MULTIPLAYER — LAN", sBtn))
+        { SFX.Ui(SFX.Id.Click); state = State.Multiplayer; }
+        if (GUI.Button(new Rect(sw / 2 - 110, sh / 2 + 89, 220, 48), "SETTINGS", sBtn))
+        { SFX.Ui(SFX.Id.Click); state = State.Settings; }
+    }
+
+    // ── Multiplayer lobby: player-hosted LAN, no servers to run ──────────────
+
+    void GuiMultiplayer(float sw, float sh)
+    {
+        var net = NetLink.Instance;
+        Panel(new Rect(sw / 2 - 320, sh / 2 - 220, 640, 440));
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 205, 600, 50), "LAN CO-OP — BETA", sTitle);
+        GUI.Label(new Rect(sw / 2 - 280, sh / 2 - 135, 560, 70),
+            "One player hosts — their machine is the server. Everyone else joins the " +
+            "host's IP on the same network. Crews see each other's ships and designs; " +
+            "combat and NPCs stay local in this beta.", sMed);
+
+        float y = sh / 2 - 40;
+        if (net != null && net.Active)
+        {
+            sMed.normal.textColor = new Color(0.4f, 1f, 0.6f);
+            GUI.Label(new Rect(sw / 2 - 280, y, 560, 32), net.Session.Status, sMed);
+            sMed.normal.textColor = Color.white;
+            if (GUI.Button(new Rect(sw / 2 - 235, y + 50, 220, 46), "LAUNCH", sBtn))
+            { SFX.Ui(SFX.Id.Click); EnterBuild(true); }
+            if (GUI.Button(new Rect(sw / 2 + 15, y + 50, 220, 46), "DISCONNECT", sBtn))
+            { SFX.Ui(SFX.Id.Click); net.Session.Shutdown(); }
+        }
+        else
+        {
+            if (GUI.Button(new Rect(sw / 2 - 235, y, 220, 46), "HOST A GAME", sBtn))
+            {
+                SFX.Ui(SFX.Id.Click);
+                if (NetLink.Instance.Session.StartHost()) EnterBuild(true);
+            }
+            GUI.Label(new Rect(sw / 2 + 15, y - 26, 220, 24), "Host's IP address:", sSmall);
+            joinIp = GUI.TextField(new Rect(sw / 2 + 15, y, 220, 30), joinIp, 24);
+            if (GUI.Button(new Rect(sw / 2 + 15, y + 38, 220, 40), "JOIN", sBtn))
+            {
+                SFX.Ui(SFX.Id.Click);
+                if (NetLink.Instance.Session.Join(joinIp.Trim())) EnterBuild(true);
+            }
+            if (net != null && net.Session.Status.Length > 0)
+            {
+                sSmall.normal.textColor = new Color(1f, 0.6f, 0.3f);
+                GUI.Label(new Rect(sw / 2 - 280, y + 92, 560, 26), net.Session.Status, sSmall);
+                sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+            }
+        }
+
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f, 0.6f);
+        GUI.Label(new Rect(sw / 2 - 280, sh / 2 + 130, 560, 26),
+            "Internet matchmaking — coming later. Port 7777 must be reachable on the LAN.", sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
+        if (GUI.Button(new Rect(sw / 2 - 85, sh / 2 + 160, 170, 44), "BACK", sBtn))
+        { SFX.Ui(SFX.Id.Click); state = State.Menu; }
     }
 
     void GuiSettings(float sw, float sh)
     {
-        Panel(new Rect(sw / 2 - 320, sh / 2 - 260, 640, 540));
-        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 245, 600, 50), "SETTINGS", sTitle);
+        Panel(new Rect(sw / 2 - 320, sh / 2 - 280, 640, 580));
+        GUI.Label(new Rect(sw / 2 - 300, sh / 2 - 265, 600, 50), "SETTINGS", sTitle);
 
-        float y = sh / 2 - 175;
+        float y = sh / 2 - 195;
         GameSettings.asteroidCount = SliderRow(sw, ref y, "Asteroids", GameSettings.asteroidCount, 0, 30);
         GameSettings.asteroidSpeed = SliderRowF(sw, ref y, "Asteroid speed", GameSettings.asteroidSpeed, 1f, 20f);
         GameSettings.enemyCount    = SliderRow(sw, ref y, "Enemy ships", GameSettings.enemyCount, 0, 8);
         GameSettings.allyCount     = SliderRow(sw, ref y, "Allied ships", GameSettings.allyCount, 0, 4);
         GameSettings.npcSkill      = SliderRowF(sw, ref y, "NPC speed / skill", GameSettings.npcSkill, 0.5f, 2f);
         GameSettings.mouseSens     = SliderRowF(sw, ref y, "Mouse sensitivity", GameSettings.mouseSens, 0.2f, 1.5f);
+        GameSettings.volume        = SliderRowF(sw, ref y, "Sound volume", GameSettings.volume, 0f, 1f);
         GameSettings.invertY = GUI.Toggle(new Rect(sw / 2 - 20, y, 260, 26),
             GameSettings.invertY, "  Invert mouse Y");
         y += 36;
@@ -763,7 +960,7 @@ public class GameManager : MonoBehaviour
 
     void GuiBuild(float sw, float sh)
     {
-        Panel(new Rect(10, 10, 350, 306));
+        Panel(new Rect(10, 10, 350, 332));
         GUI.Label(new Rect(22, 16, 300, 30), "SHIPYARD", sSmall);
         string[] names =
         {
@@ -788,13 +985,24 @@ public class GameManager : MonoBehaviour
             if (sel) selIdx = i;
             string mk = sel && builder.Selected.mk == 2 ? "  — Mk II ★" : "";
             sSmall.normal.textColor = sel ? Color.white : new Color(0.45f, 0.95f, 1f, 0.75f);
-            GUI.Label(new Rect(22, 44 + i * 24, 320, 24), (sel ? "▶ " : "   ") + names[i] + mk, sSmall);
+            var row = new Rect(22, 44 + i * 24, 320, 24);
+            GUI.Label(row, (sel ? "▶ " : "   ") + names[i] + mk, sSmall);
+            // Rows are tappable/clickable too (again on the selected row = Mk toggle).
+            if (builder != null && GUI.Button(row, "", GUIStyle.none))
+            { SFX.Ui(SFX.Id.Click, 0.5f); builder.SelectFromUi(types[i]); }
         }
         sSmall.normal.textColor = new Color(0.8f, 0.9f, 1f, 0.9f);
         GUI.Label(new Rect(22, 168, 320, 72), descs[selIdx], sSmall);
         sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
-        GUI.Label(new Rect(22, 244, 320, 52),
-            "Same number / Tab — Mk II   ·   LMB place\nRMB remove   ·   WASD orbit   ·   Scroll zoom", sSmall);
+        GUI.Label(new Rect(22, 244, 320, 78),
+            "Same number / Tab — Mk II   ·   LMB place\nRMB remove   ·   WASD orbit   ·   Scroll zoom\nC — copy ship code   ·   V — paste ship code", sSmall);
+
+        if (toastT > 0f)
+        {
+            sMed.normal.textColor = new Color(0.4f, 1f, 0.7f, Mathf.Clamp01(toastT));
+            GUI.Label(new Rect(sw / 2 - 300, sh - 140, 600, 34), builderToast, sMed);
+            sMed.normal.textColor = Color.white;
+        }
 
         // Engineering readout: live stats + a balance verdict, so builders can
         // see what the physics will do before they launch.
@@ -852,6 +1060,11 @@ public class GameManager : MonoBehaviour
         sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
         GUI.Label(new Rect(22, sh - 36, 540, 24),
             "Tip: keep thrust symmetric around the center of mass", sSmall);
+
+        GUI.enabled = ReadyToLaunch();
+        if (GUI.Button(new Rect(sw - 200, sh - 76, 186, 56), "LAUNCH ▶", sBtn))
+        { SFX.Ui(SFX.Id.Click); Launch(); }
+        GUI.enabled = true;
     }
 
     void GuiPlaying(float sw, float sh)
@@ -878,11 +1091,17 @@ public class GameManager : MonoBehaviour
             sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
         }
 
-        Panel(new Rect(sw - 250, 10, 240, 68));
+        bool crewed = NetLink.Instance != null && NetLink.Instance.Active;
+        Panel(new Rect(sw - 250, 10, 240, crewed ? 92 : 68));
         sSmall.alignment = TextAnchor.UpperRight;
         GUI.Label(new Rect(sw - 262, 16, 240, 26), $"HOSTILES  {CountFaction(Faction.Enemy)}", sSmall);
         sSmall.normal.textColor = new Color(0.4f, 1f, 0.6f);
         GUI.Label(new Rect(sw - 262, 40, 240, 26), $"ALLIES  {CountFaction(Faction.Ally)}", sSmall);
+        if (crewed)
+        {
+            sSmall.normal.textColor = new Color(0.3f, 0.9f, 1f);
+            GUI.Label(new Rect(sw - 262, 64, 240, 26), $"CREW  {NetLink.Instance.CrewCount}", sSmall);
+        }
         sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
         sSmall.alignment = TextAnchor.UpperLeft;
 
@@ -895,17 +1114,88 @@ public class GameManager : MonoBehaviour
         GUI.DrawTexture(new Rect(cx - 1, cy + 4,  2, 8), Texture2D.whiteTexture);
         GUI.color = Color.white;
 
+        // Hit marker: an X flare on the crosshair when your shot lands.
+        if (hitMarkT > 0f)
+        {
+            var m = GUI.matrix;
+            GUIUtility.RotateAroundPivot(45f, new Vector2(cx, cy));
+            GUI.color = new Color(1f, 0.55f, 0.3f, Mathf.Clamp01(hitMarkT / 0.22f));
+            GUI.DrawTexture(new Rect(cx - 16, cy - 1.5f, 10, 3), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(cx + 6,  cy - 1.5f, 10, 3), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(cx - 1.5f, cy - 16, 3, 10), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(cx - 1.5f, cy + 6,  3, 10), Texture2D.whiteTexture);
+            GUI.matrix = m;
+            GUI.color = Color.white;
+        }
+
+        // Damage direction: a red bar orbiting the crosshair, pointing at
+        // whoever just hit you.
+        if (dmgT > 0f && PlayerShip != null)
+        {
+            Vector3 local = cam.transform.InverseTransformDirection(dmgDir);
+            float aDeg = Mathf.Atan2(local.x, local.y) * Mathf.Rad2Deg;
+            var m = GUI.matrix;
+            GUIUtility.RotateAroundPivot(aDeg, new Vector2(cx, cy));
+            GUI.color = new Color(1f, 0.3f, 0.25f, Mathf.Clamp01(dmgT / 1.2f));
+            GUI.DrawTexture(new Rect(cx - 16, cy - 92, 32, 7), Texture2D.whiteTexture);
+            GUI.matrix = m;
+            GUI.color = Color.white;
+        }
+
+        DrawLeadReticle(sw, sh);
+
         DrawTurboBar(sw, sh);
         if (Carrier.Instance != null && Carrier.Instance.CanRefit(PlayerShip))
         {
-            sMed.normal.textColor = new Color(0.3f, 0.9f, 1f);
-            GUI.Label(new Rect(sw / 2 - 200, sh / 2 + 60, 400, 36), "E  —  refit at the hangar", sMed);
-            sMed.normal.textColor = Color.white;
+            if (GUI.Button(new Rect(sw / 2 - 160, sh / 2 + 60, 320, 44),
+                TouchControls.Enabled ? "REFIT AT THE HANGAR" : "E  —  REFIT AT THE HANGAR", sBtn))
+            { SFX.Ui(SFX.Id.Click); EnterBuild(false); }
         }
 
         DrawRadar(sw, sh);
         DrawHelp(sh);
         if (PlayerStranded) GuiStranded(sw, sh);
+    }
+
+    // Lead reticle: for the nearest hostile roughly ahead, mark where a bolt
+    // fired NOW would meet them — put the crosshair on the diamond, not the ship.
+    void DrawLeadReticle(float sw, float sh)
+    {
+        if (PlayerShip == null || PlayerShip.Body == null) return;
+        Vector3 myPos = PlayerShip.transform.position;
+        Vector3 myVel = PlayerShip.Body.isKinematic ? Vector3.zero : PlayerShip.Body.velocity;
+
+        Ship best = null;
+        float bestAngle = 32f;
+        foreach (var s in Ships)
+        {
+            if (s == null || s.faction != Faction.Enemy || s.Body == null) continue;
+            Vector3 to = s.transform.position - myPos;
+            if (to.sqrMagnitude > 300f * 300f) continue;
+            float ang = Vector3.Angle(PlayerShip.transform.forward, to);
+            if (ang < bestAngle) { bestAngle = ang; best = s; }
+        }
+        if (best == null) return;
+
+        Vector3 relPos = best.transform.position - myPos;
+        Vector3 relVel = (best.Body.isKinematic ? Vector3.zero : best.Body.velocity) - myVel;
+        float t;
+        if (!Targeting.Lead(relPos, relVel, 90f, out t) || t > 5f) return;
+
+        Vector3 aim = best.transform.position + relVel * t;
+        Vector3 sp = cam.WorldToScreenPoint(aim);
+        if (sp.z < 0f) return;
+        float x = sp.x / uiScale, y = sh - sp.y / uiScale;
+
+        var m = GUI.matrix;
+        GUIUtility.RotateAroundPivot(45f, new Vector2(x, y));
+        GUI.color = new Color(1f, 0.4f, 0.3f, 0.9f);
+        GUI.DrawTexture(new Rect(x - 9, y - 9, 18, 2), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(x - 9, y + 7, 18, 2), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(x - 9, y - 9, 2, 18), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(x + 7, y - 9, 2, 18), Texture2D.whiteTexture);
+        GUI.matrix = m;
+        GUI.color = Color.white;
     }
 
     // Turbo heat pool — drained by turbo, refilled while cruising.
@@ -965,6 +1255,11 @@ public class GameManager : MonoBehaviour
                 Vector2 sp = RadarPoint(def.spacePos, range, R, out bool srcFar);
                 Blip(c, sp, def.radarColor, 13f, srcFar ? 0.85f : 1f);
             }
+            foreach (var poi in pois) // faint gray: asteroid fields, the wreck
+            {
+                Vector2 pp = RadarPoint(poi.pos, range, R, out bool poiFar);
+                Blip(c, pp, new Color(0.7f, 0.75f, 0.8f), poiFar ? 6f : 8f, 0.5f);
+            }
             if (Carrier.Instance != null)
             {
                 Vector2 cp = RadarPoint(Carrier.Instance.transform.position, range, R, out bool carFar);
@@ -976,9 +1271,33 @@ public class GameManager : MonoBehaviour
         Blip(c, Vector2.zero, new Color(0.45f, 0.95f, 1f), 9f, 1f);
         Blip(c, new Vector2(0f, -13f), new Color(0.45f, 0.95f, 1f), 4f, 0.8f);
 
+        // Nav readout: nearest destination in space, escape altitude in-world.
+        string nav;
+        if (currentPlanet == null)
+        {
+            string best = "";
+            float bestD = float.MaxValue;
+            foreach (var def in planetDefs)
+            {
+                float d = (def.spacePos - PlayerShip.transform.position).magnitude - def.EntryRadius;
+                if (d < bestD) { bestD = d; best = def.name.ToUpper(); }
+            }
+            float dc = (Carrier.Instance != null
+                ? (Carrier.Instance.transform.position - PlayerShip.transform.position).magnitude
+                : float.MaxValue);
+            if (dc < bestD) { bestD = dc; best = "CARRIER"; }
+            nav = $"{best}  {Mathf.Max(0f, bestD) / 1000f:0.0} km";
+        }
+        else
+        {
+            float climb = surface.Center.y + SurfaceWorld.CloudTop + 60f - PlayerShip.transform.position.y;
+            nav = climb > 0f ? $"EXIT: CLIMB {climb:0} m" : "EXITING…";
+        }
         sSmall.alignment = TextAnchor.UpperCenter;
-        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f, 0.7f);
-        GUI.Label(new Rect(c.x - 80, c.y + R - 8, 160, 22), "M — map", sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f, 0.9f);
+        GUI.Label(new Rect(c.x - 110, c.y + R - 26, 220, 22), nav, sSmall);
+        sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f, 0.6f);
+        GUI.Label(new Rect(c.x - 80, c.y + R - 4, 160, 20), "M — map", sSmall);
         sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
         sSmall.alignment = TextAnchor.UpperLeft;
     }
@@ -1038,6 +1357,8 @@ public class GameManager : MonoBehaviour
         {
             foreach (var def in planetDefs)
                 MapLabel(def.spacePos, def.name, def.radarColor);
+            foreach (var poi in pois)
+                MapLabel(poi.pos, poi.name, new Color(0.7f, 0.75f, 0.8f));
             if (Carrier.Instance != null)
                 MapLabel(Carrier.Instance.transform.position, "CARRIER", new Color(0.3f, 0.9f, 1f));
         }
@@ -1053,11 +1374,12 @@ public class GameManager : MonoBehaviour
     {
         Vector3 sp = cam.WorldToScreenPoint(world);
         if (sp.z < 0f) return;
-        float y = Screen.height - sp.y;
-        Blip(new Vector2(sp.x, y), Vector2.zero, col, 11f, 1f);
+        float x = sp.x / uiScale;
+        float y = (Screen.height - sp.y) / uiScale;
+        Blip(new Vector2(x, y), Vector2.zero, col, 11f, 1f);
         sSmall.alignment = TextAnchor.UpperCenter;
         sSmall.normal.textColor = col;
-        GUI.Label(new Rect(sp.x - 90, y + 10, 180, 24), label, sSmall);
+        GUI.Label(new Rect(x - 90, y + 10, 180, 24), label, sSmall);
         sSmall.normal.textColor = new Color(0.45f, 0.95f, 1f);
         sSmall.alignment = TextAnchor.UpperLeft;
     }
@@ -1086,8 +1408,8 @@ public class GameManager : MonoBehaviour
             "1 / 2 / 3 — chase / rear / free cam\n" +
             "M — 3D system map\n\n" +
             "Radar: top = your nose. Rim blips =\n" +
-            "far away. Blue dots = planets,\n" +
-            "orange = Titanhold, cyan = carrier.\n" +
+            "far away. Colored dots = planets,\n" +
+            "cyan = carrier, gray = rock fields.\n" +
             "Fly into a planet's cloud shell to\n" +
             "enter its world; climb back above\n" +
             "the clouds to leave. Surfaces loop\n" +
@@ -1096,13 +1418,14 @@ public class GameManager : MonoBehaviour
 
     void GuiStranded(float sw, float sh)
     {
-        Panel(new Rect(sw / 2 - 330, sh - 190, 660, 130));
+        Panel(new Rect(sw / 2 - 330, sh - 250, 660, 190));
         sMed.normal.textColor = new Color(1f, 0.55f, 0.25f);
-        GUI.Label(new Rect(sw / 2 - 320, sh - 182, 640, 40), "STRANDED — ALL ENGINES DESTROYED", sMed);
+        GUI.Label(new Rect(sw / 2 - 320, sh - 242, 640, 40), "STRANDED — ALL ENGINES DESTROYED", sMed);
         sMed.normal.textColor = Color.white;
-        GUI.Label(new Rect(sw / 2 - 320, sh - 140, 640, 70),
-            "You can't die out here. Guns and RCS still answer — fight on, or press R " +
-            "to tow the core back to the shipyard and respawn (score carries over).", sMed);
-        sMed.normal.textColor = Color.white;
+        GUI.Label(new Rect(sw / 2 - 320, sh - 200, 640, 70),
+            "You can't die out here. Guns and RCS still answer — fight on, or respawn: " +
+            "the core gets towed back to the shipyard and your score carries over.", sMed);
+        if (GUI.Button(new Rect(sw / 2 - 105, sh - 122, 210, 44), "RESPAWN  (R)", sBtn))
+        { SFX.Ui(SFX.Id.Click); EnterBuild(false); }
     }
 }

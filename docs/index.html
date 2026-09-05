@@ -154,6 +154,8 @@
   .korrath .globe { background: radial-gradient(circle at 32% 30%, #7A6A50, #4A3E2E 55%, #14202E 100%); box-shadow: 0 0 22px rgba(115,242,255,0.18); }
   .vessa .globe { background: radial-gradient(circle at 32% 30%, #E8F1FA, #9FB8D0 55%, #1A2C42 100%); box-shadow: 0 0 22px rgba(169,207,255,0.25); }
   .titanhold .globe { background: radial-gradient(circle at 32% 30%, #D9A45C, #8A6228 55%, #2E1F08 100%); box-shadow: 0 0 26px rgba(255,196,92,0.28); }
+  .emberfall .globe { background: radial-gradient(circle at 32% 30%, #C4502E, #5E1F10 55%, #170603 100%); box-shadow: 0 0 26px rgba(255,90,60,0.3); }
+  .emberfall .wtag { color: var(--red); }
   .titanhold .ring {
     position: absolute; left: -20px; right: -20px; top: 50%; height: 30px;
     transform: translateY(-50%) rotate(-14deg);
@@ -323,13 +325,13 @@
         </div>
         <div class="panel feature">
           <h3><span class="k">04</span>One sky, many worlds</h3>
-          <p>All three planets hang in one continuous space — no loading screens, no map select.
-          Fly into a globe's cloud shell and you're <b>inside its weather</b>; climb back above
-          the clouds and you're in clean zero-g again.</p>
+          <p>Four planets and three deep asteroid fields hang in one continuous 35 km system —
+          no loading screens, no map select. Fly into a globe's cloud shell and you're
+          <b>inside its weather</b>; climb back above the clouds and you're in clean zero-g again.</p>
         </div>
         <div class="panel feature">
           <h3><span class="k">05</span>Turbo, anchor, armor</h3>
-          <p><b>T</b> burns the engine heat pool for 320 m/s transits. <b>G</b> anchors you dead
+          <p><b>T</b> burns the engine heat pool for 450 m/s transits. <b>G</b> anchors you dead
           still against gravity and gunfire — turret mode. <b>F</b> raises armor mode: every hit
           lands on your plating until they break through it.</p>
         </div>
@@ -347,7 +349,7 @@
   <section class="section" id="worlds">
     <div class="wrap">
       <div class="eyebrow">System chart</div>
-      <h2>Three worlds, three storms</h2>
+      <h2>Four worlds, four storms</h2>
       <p class="lead">Punch through a cloud shell and the game hands you a different scene:
       flat ground, looping horizon, that world's weather owning the sky.</p>
       <div class="grid">
@@ -379,10 +381,22 @@
             clouds: sand-gold murk down to wind-scoured flats.</p>
           </div>
         </div>
+        <div class="panel world emberfall">
+          <div class="disc"><div class="globe"></div></div>
+          <div>
+            <h3>Emberfall</h3>
+            <div class="wtag">Ash &amp; ember storm</div>
+            <p>The scorched one. Dark red murk, sparks boiling up from the cinder flats, and
+            lava pools glowing through the haze. Watch your altimeter — the ground finds
+            careless pilots.</p>
+          </div>
+        </div>
       </div>
-      <p class="worlds-note">Every surface <b>loops</b> — hold your heading for three kilometers
-      and you arrive exactly where you started. Flat maps that play round: cheap to render,
-      impossible to fall off.</p>
+      <p class="worlds-note">Every surface <b>loops</b> — hold your heading for that world's lap
+      (four to nine kilometers) and you arrive exactly where you started. Flat maps that play
+      round: cheap to render, impossible to fall off. Between the worlds drift three
+      destructible asteroid fields — and in <b>the Graveyard</b>, a wrecked capital ship with
+      its distress beacon still blinking.</p>
     </div>
   </section>
 
@@ -421,9 +435,9 @@
       <p class="lead">Packaged builds are on the roadmap. Until then the source runs in
       minutes — the entire game is seventeen C# files and one empty scene.</p>
       <div class="dl-row">
-        <div class="dl"><span class="plat">macOS</span><span class="soon">— docking soon —</span></div>
-        <div class="dl"><span class="plat">Windows</span><span class="soon">— docking soon —</span></div>
-        <div class="dl"><span class="plat">WebGL</span><span class="soon">— docking soon —</span></div>
+        <div class="dl"><span class="plat">Windows / Steam</span><span class="soon">— build-ready —</span></div>
+        <div class="dl"><span class="plat">Android / iOS</span><span class="soon">— build-ready, touch controls in —</span></div>
+        <div class="dl"><span class="plat">WebGL</span><span class="soon">— build-ready —</span></div>
       </div>
       <div class="panel source">
         <div class="eyebrow">Build from source — the real download</div>
@@ -443,12 +457,12 @@
       <div class="eyebrow">Telemetry</div>
       <h2>By the numbers</h2>
       <div class="stats">
-        <div class="panel stat"><div class="n">0</div><div class="l">art assets</div></div>
+        <div class="panel stat"><div class="n">0</div><div class="l">art or audio assets</div></div>
         <div class="panel stat"><div class="n">17</div><div class="l">C# scripts</div></div>
-        <div class="panel stat"><div class="n">3,480</div><div class="l">lines of code</div></div>
-        <div class="panel stat"><div class="n">29</div><div class="l">automated checks</div></div>
-        <div class="panel stat"><div class="n">3</div><div class="l">worlds, one sky</div></div>
-        <div class="panel stat"><div class="n">320</div><div class="l">m/s at full turbo</div></div>
+        <div class="panel stat"><div class="n">4,891</div><div class="l">lines of code</div></div>
+        <div class="panel stat"><div class="n">49</div><div class="l">automated checks</div></div>
+        <div class="panel stat"><div class="n">4</div><div class="l">worlds, one sky</div></div>
+        <div class="panel stat"><div class="n">450</div><div class="l">m/s at full turbo</div></div>
         <div class="panel stat"><div class="n">1,200</div><div class="l">stars in the field</div></div>
         <div class="panel stat"><div class="n">900</div><div class="l">pts per gunship</div></div>
       </div>
@@ -463,14 +477,32 @@
       <p class="lead">Development moves fast — every entry below shipped playable.</p>
       <div class="log">
         <div class="entry">
-          <div class="stamp"><span class="v">v0.7</span> · 2026-08-15 · latest</div>
+          <div class="stamp"><span class="v">v0.9</span> · 2026-09-05 · latest</div>
+          <h3>Sound &amp; Signal</h3>
+          <p>The game found its voice: a fully synthesized soundscape — lasers, impacts, your
+          engine's hum, warp transitions — with zero audio files. Combat feel joined it: hit
+          markers, damage-direction indicators, and a lead reticle that shows where to shoot.
+          Ship designs became shareable <b>ship codes</b> (C/V in the shipyard, auto-saved
+          between sessions), and <b>LAN co-op (beta)</b> arrived: player-hosted, no servers —
+          crews see each other's real designs fly.</p>
+        </div>
+        <div class="entry old">
+          <div class="stamp"><span class="v">v0.8</span> · 2026-09-04</div>
+          <h3>Deep Space</h3>
+          <p>The system tripled in size to 35 km. A fourth world — Emberfall, an ash-and-ember
+          storm over glowing lava pools. Per-world surface laps (4–9 km), three deep asteroid
+          fields including the Graveyard and its wrecked capital ship, turbo raised to 450 m/s,
+          and a nav readout under the radar.</p>
+        </div>
+        <div class="entry old">
+          <div class="stamp"><span class="v">v0.7</span> · 2026-08-15</div>
           <h3>The Living System</h3>
           <p>A blazing sun with halo, rotating globes with drifting cloud shells, carrier nav
           beacons and runway chevrons, per-world surface dressing, lightning on Korrath,
           armored gunships worth 900, shipyard engineering panel with balance markers,
           title cards on every transition.</p>
         </div>
-        <div class="entry">
+        <div class="entry old">
           <div class="stamp"><span class="v">v0.6</span> · 2026-08-14</div>
           <h3>One Sky</h3>
           <p>No Man's Sky-style scene swaps: globes in space are doors, surfaces are flat
@@ -518,9 +550,10 @@
       <h2>Where this is heading</h2>
       <div class="road">
         <div class="panel">
-          <h3>Multiplayer<span class="chip soon">coming soon</span></h3>
-          <p>The button is already on the menu. Blueprints are plain grid data and the world
-          is deterministic — built to bolt netcode on without a rewrite.</p>
+          <h3>Online multiplayer<span class="chip soon">next up</span></h3>
+          <p><b>LAN co-op shipped in v0.9</b> — one player hosts, crews fly together, ship
+          designs sync as codes. Next: an internet relay and combat authority so squads can
+          fight the same battle from anywhere.</p>
         </div>
         <div class="panel">
           <h3>Mk III abilities<span class="chip idea">exploring</span></h3>

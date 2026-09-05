@@ -1,0 +1,26 @@
+// SteamPipe build script template for Starship Craft.
+// 1. Replace YOUR_APP_ID / YOUR_DEPOT_ID with the ids from Steamworks
+//    (App Admin → SteamPipe → Depots).
+// 2. Build the game first:  builds/windows/  (see README → Deployment).
+// 3. Upload:  steamcmd +login <account> +run_app_build ../steam/app_build.vdf +quit
+"AppBuild"
+{
+	"AppID" "YOUR_APP_ID"
+	"Desc" "Starship Craft v0.9"
+	"ContentRoot" "../builds/windows/"
+	"BuildOutput" "../builds/steam_output/"
+	"SetLive" "beta" // branch to publish to; leave empty to upload without going live
+
+	"Depots"
+	{
+		"YOUR_DEPOT_ID"
+		{
+			"FileMapping"
+			{
+				"LocalPath" "*"
+				"DepotPath" "."
+				"Recursive" "1"
+			}
+		}
+	}
+}

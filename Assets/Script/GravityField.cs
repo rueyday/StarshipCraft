@@ -7,7 +7,7 @@ using UnityEngine;
 //   inside the band   : g fades linearly to zero as you climb
 //   above cloudTop    : hard zero — space stays clean, no long-range wells
 // What it feels like inside a world's atmosphere (below its cloud top).
-public enum WeatherKind { None, Dust, Cloud, Snow }
+public enum WeatherKind { None, Dust, Cloud, Snow, Ember }
 
 public static class GravityField
 {

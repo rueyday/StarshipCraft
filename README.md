@@ -13,10 +13,11 @@ orbital asteroid belt, and friend-and-foe NPC ships — with difficulty you cont
 The entire game is code-driven — no prefabs or scene objects needed.
 
 1. Open Unity (**2020.3.16f1**)
-2. Open or create an empty scene
-3. Create an empty GameObject and name it **GameManager**
-4. Add the **GameManager** script component to it
-5. Hit **Play**
+2. Open **`Assets/Scenes/Main.unity`** (it contains just the GameManager object)
+3. Hit **Play**
+
+(Any empty scene works too — create an empty GameObject named **GameManager**
+and add the `GameManager` script.)
 
 Everything else — menus, shipyard, ships, asteroids, NPCs, starfield, effects —
 is generated at runtime.
@@ -42,6 +43,7 @@ start a new run from the main menu.
 | RMB | Remove aimed block (blocks cut off from the Core break off too) |
 | 1 / 2 / 3 / 4 / 5 | Select Hull / Thruster / RCS / Gun / Armor |
 | Same number, or Tab | Toggle Mk I ↔ Mk II of the selected block |
+| C / V | Copy your design to the clipboard as a **ship code** / load one from the clipboard — share builds as text. Your design also auto-saves between sessions |
 | WASD or middle-drag | Orbit camera · Scroll to zoom |
 | Enter | Launch (needs at least one Thruster) |
 
@@ -124,37 +126,46 @@ linearly to zero inside the clouds, pure zero-g above them — space battles
 stay clean, and punching up through a cloud deck is how you feel the ship go
 weightless.
 
+Planets work No Man's Sky-style. In space — a system some **35 km across** —
+you see every globe at once: they're landmarks you fly **into**, not meshes
+you land on. Punch through a globe's translucent **cloud shell** and the game
+swaps you into that planet's own surface scene: a **flat** ground under that
+world's weather (flat terrain is cheap to render and plays better than a
+giant sphere). Each surface **loops** — fly straight for that world's lap
+(4–9 km depending on the planet) and you seamlessly arrive back where you
+started; that's how a flat map plays "round". Climb back above the clouds
+(~650 m) and you pop out into space beside the globe.
+
 - **The Carrier** (cyan blip, your spawn) — a landable flight deck with glowing
   runway strips. Settle onto the marked pad under 6 m/s and press **E** to
   refit in the shipyard without leaving the world; launches and stranded
   respawns return you to the deck.
-Planets work No Man's Sky-style. In space you see every globe at once —
-they're landmarks you fly **into**, not meshes you land on. Punch through a
-globe's translucent **cloud shell** and the game swaps you into that planet's
-own surface scene: a **flat** ground under that world's weather (flat terrain
-is cheap to render and plays better than a giant sphere). Each surface
-**loops**: fly straight for 3 km and you seamlessly arrive back where you
-started — that's how a flat map plays "round". Climb back above the clouds
-(~650 m) and you pop out into space beside the globe.
-
-- **Korrath** (blue blip) — a 1.4 km rocky globe with oceans and a tilted
-  orbital belt of ~70 rocks amid ring dust (gentle bumps under 6 m/s bounce
-  harmlessly). Inside, its sky is **cloud banks**: soft white fog and huge
-  drifting puffs over dark rock. Land under ~14 m/s for dust, not damage;
-  harder impacts smash blocks (two past 30 m/s).
-- **Vessa** (blue blip) — a 650 m ice globe. Inside: a **snow storm** —
-  pale-blue fog and flakes streaming down over pale ground.
-- **Titanhold** (orange blip) — the Saturn of the system: a 3.5 km
+- **Korrath** (blue blip, 6 km lap) — a 1.4 km rocky globe with oceans and a
+  tilted orbital belt of ~70 rocks amid ring dust (gentle bumps under 6 m/s
+  bounce harmlessly). Inside, its sky is **cloud banks**: soft white fog,
+  huge drifting puffs, and lightning down deep. Land under ~14 m/s for dust,
+  not damage; harder impacts smash blocks (two past 30 m/s).
+- **Vessa** (ice-blue blip, 4 km lap) — a 650 m ice globe. Inside: a
+  **snow storm** — pale-blue fog and flakes streaming down over frozen lakes.
+- **Titanhold** (orange blip, 9 km lap) — the Saturn of the system: a 3.5 km
   butterscotch globe wrapped in a **four-band golden ring** (9–12 km out,
   spinning, with embedded debris racing past at over a kilometer per second).
   The ring is lethal: anything inside the band loses a block roughly twice a
   second. Inside the globe: a **giant dust storm**, sand-gold fog and
   wind-blown grit down to wind-scoured flats.
+- **Emberfall** (red-orange blip, 5 km lap) — a scorched cinder globe. Inside:
+  an **ash-and-ember storm** — dark red murk, glowing sparks boiling up from
+  the ground, and lava pools shining through the haze.
+- **Deep fields** (gray blips) — three destructible asteroid clusters strung
+  between the worlds: **Shatter Field**, **The Spindle**, and **The
+  Graveyard**, where a wrecked capital ship drifts with its distress beacon
+  still blinking. Landmarks, cover, and shortcuts on the long hauls.
 
-**Turbo** covers the distances: hold T for ~220 m/s straight-line flight. It
+**Turbo** covers the distances: hold T for ~450 m/s straight-line flight. It
 drains a heat pool fed by your engines (Mk I ≈ 4 s each, Mk II ≈ 10 s each,
 regenerating at half rate), turns go wide, and weapons stay offline until a
-second after you drop out — no turbo-sniping.
+second after you drop out — no turbo-sniping. The radar's nav readout always
+shows your nearest destination and its distance.
 
 ## Enemies, Allies, Asteroids
 
@@ -183,8 +194,37 @@ From the main menu, **Settings** exposes sliders plus Easy / Normal / Hard prese
 | Allied ships | 0–4 | Friendly NPCs kept alive |
 | NPC speed / skill | 0.5–2 | NPC turn rate, throttle and aggression |
 | Mouse sensitivity | 0.2–1.5 | Flight stick feel (plus an Invert Y toggle) |
+| Sound volume | 0–1 | Master volume for the synthesized soundscape |
 
 ---
+
+## Multiplayer — LAN co-op (beta)
+
+**MULTIPLAYER — LAN** on the menu. One player picks **Host a game** — their
+machine becomes the server (a listen server on port 7777; no central servers,
+nothing to rent). Everyone else on the same network types the host's IP and
+joins. Crew members appear as friendly ships flying their *actual* designs
+(ship codes sync automatically at launch), with positions streaming at 10 Hz —
+but only while you're in the same zone: fly into Korrath and you vanish from
+space until a crewmate follows you through the clouds. The HUD shows a CREW
+count while connected.
+
+Beta scope: presence, designs, and flight are shared; combat and NPCs stay
+local to each machine (crew avatars can't be damaged). Internet matchmaking is
+the next step — the protocol (`NetSession.cs`) is transport-simple TCP so a
+relay can bolt on later.
+
+## Combat feel
+
+- **Sound, all of it synthesized** — lasers, impacts, explosions, your engine's
+  hum (it howls under turbo), warp transitions, UI clicks. Zero audio files,
+  like everything else in the project. Master volume in Settings.
+- **Hit confirmation** — an orange X flares on the crosshair with a bright
+  ping when your bolt connects.
+- **Damage direction** — a red bar orbits the crosshair pointing at whoever
+  just hit you.
+- **Lead reticle** — a red diamond marks where a bolt fired *now* would meet
+  the nearest hostile ahead; put the crosshair on the diamond, not the ship.
 
 ## Visuals
 
@@ -228,14 +268,83 @@ All scripts live in `Assets/Script/`.
 | `Bullet.cs` | Faction-aware energy bolt with trail |
 | `GravityField.cs` | Cloud-layer gravity: constant below clouds, fades in-band, zero above (space itself is zero-g) |
 | `Planet.cs` | `PlanetDef` world data + `SpacePlanet` globes: terrain/ocean/cloud shell, belt, the deadly spinning ring |
-| `SurfaceWorld.cs` | Per-planet flat surface scene with toroidal wrap (the 3 km loop) |
-| `Weather.cs` | Per-world atmosphere scenes: dust storm / cloud banks / snow storm |
+| `SurfaceWorld.cs` | Per-planet flat surface scene with toroidal wrap (4–9 km laps) and ground dressing |
+| `Weather.cs` | Per-world atmosphere scenes: dust storm / cloud banks / snow storm / ember storm |
 | `Carrier.cs` | The carrier: landable deck, refit pad, spawn point |
 | `Asteroid.cs` | Split/score notifications, planet gravity, ram damage with a gentle-bump threshold |
 | `MeshFactory.cs` | Procedural meshes: hard-edged cube, combined hull mesh for the convex collider, Perlin-displaced icosphere asteroids |
 | `FX.cs` | All effects: materials, engine flames, explosions, debris, starfield, fading lights |
+| `SFX.cs` | The whole soundscape, synthesized at load — no audio files |
+| `NetCodec.cs` | Ship codes: blueprint ↔ shareable string (clipboard, save file, network) |
+| `NetSession.cs` | LAN listen-server transport: TCP framing, handshake, host relay |
+| `NetLink.cs` | Scene bridge: pumps the session, spawns zone-matched crew avatars |
+| `Targeting.cs` | Intercept math behind the lead reticle |
 
 ---
+
+## Deployment
+
+The project is build-ready: `Assets/Scenes/Main.unity` (the GameManager scene)
+is the only scene in Build Settings, platform bundle ids/version are set
+(`com.rueyday.starshipcraft`, v0.9.0), Android/iOS use IL2CPP with ARM64, and
+phones get touch controls + UI scaling automatically. Build from the editor's
+**Build** menu, or headless:
+
+```sh
+UNITY="/Applications/Unity/Hub/Editor/2020.3.16f1/Unity.app/Contents/MacOS/Unity"
+"$UNITY" -batchmode -quit -projectPath . -executeMethod BuildAll.Windows -logFile build.log
+# also: BuildAll.Mac  BuildAll.Linux  BuildAll.Android  BuildAll.AndroidBundle
+#       BuildAll.IOS  BuildAll.WebGL         → outputs land in builds/ (gitignored)
+```
+
+Each target needs its Unity **build support module** installed via Unity Hub
+(Installs → ⚙ → Add modules).
+
+### Windows
+1. Install the *Windows Build Support (Mono/IL2CPP)* module.
+2. `BuildAll.Windows` → `builds/windows/StarshipCraft.exe` plus its `_Data`
+   folder — zip the whole `builds/windows/` directory to distribute.
+
+### Steam
+1. Create the app in [Steamworks](https://partner.steamgames.com) → note your
+   **App ID** and the auto-created **Depot ID**.
+2. Build for Windows (above; add macOS/Linux depots the same way for those).
+3. Edit `steam/app_build.vdf` — fill in the App ID, Depot ID, and the branch
+   to publish (`SetLive`).
+4. Install the [Steamworks SDK](https://partner.steamgames.com/downloads/list)
+   and upload from its `tools/ContentBuilder/builder` directory:
+   ```sh
+   ./steamcmd.sh +login YOUR_ACCOUNT +run_app_build /full/path/to/steam/app_build.vdf +quit
+   ```
+5. In Steamworks: set the launch option to `StarshipCraft.exe`, then publish
+   the branch. (Steamworks achievements/overlay are optional — the game runs
+   without the Steam SDK.)
+
+### Android
+1. Install the *Android Build Support* module **with** OpenJDK, SDK & NDK
+   ticked (the NDK is required — the project is configured for IL2CPP+ARM64,
+   which Google Play mandates).
+2. For sideloading/testing: `BuildAll.Android` → `builds/android/StarshipCraft.apk`.
+3. For the Play Store: create a signing keystore once (*Project Settings →
+   Player → Publishing Settings → Keystore Manager*), then
+   `BuildAll.AndroidBundle` → upload `StarshipCraft.aab` in the
+   [Play Console](https://play.google.com/console).
+4. Touch controls appear automatically: left thumb steers, right rail is the
+   throttle, with FIRE / TRB / ANC / ARM / MAP buttons; in the shipyard, tap
+   to place, toggle **DEL** to remove, two-finger drag/pinch to orbit.
+
+### iOS
+1. On a Mac with Xcode: install the *iOS Build Support* module.
+2. `BuildAll.IOS` → an Xcode project in `builds/ios/`.
+3. Open `Unity-iPhone.xcodeproj`, set your team under *Signing & Capabilities*,
+   and build to device / archive for App Store Connect. The local-network
+   permission text (needed for LAN co-op on iOS 14+) is injected into
+   Info.plist automatically by the build script.
+
+### LAN co-op on all platforms
+Port **7777**/TCP must be reachable between machines (allow it through the
+Windows firewall prompt on first host; on iOS accept the local-network
+permission dialog). Desktop, Android and iOS crews can all join each other.
 
 ## Project Notes
 

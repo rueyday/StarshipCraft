@@ -19,6 +19,20 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        // Mobile: the virtual stick/rail replaces mouse+keyboard entirely.
+        if (TouchControls.Enabled)
+        {
+            ship.ThrustInput = TouchControls.Throttle;
+            ship.Boost = false;
+            ship.Brake = false;
+            ship.Turbo = TouchControls.TurboHeld;
+            ship.TorqueInput = new Vector3(-TouchControls.Steer.y, TouchControls.Steer.x, 0f);
+            if (TouchControls.AnchorTap) { TouchControls.AnchorTap = false; ship.SetAnchored(!ship.Anchored); }
+            if (TouchControls.ArmorTap) { TouchControls.ArmorTap = false; ship.SetArmorMode(!ship.ArmorMode); }
+            if (TouchControls.FireHeld) ship.TryFire();
+            return;
+        }
+
         ship.ThrustInput = Input.GetAxis("Vertical");
         ship.Boost = Input.GetKey(KeyCode.LeftShift);
         ship.Brake = Input.GetKey(KeyCode.X);

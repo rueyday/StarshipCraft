@@ -13,6 +13,7 @@ public class PlanetDef
     public bool    hasOcean, hasBelt, hasRing;
     public WeatherKind weather;
     public Color   radarColor;
+    public float   loopSize = 3000f; // surface scene wrap period — bigger world, longer lap
 
     // Fly inside this radius (the visible cloud shell) and you enter the world.
     public float EntryRadius => radius * 1.5f;
@@ -52,8 +53,9 @@ public class SpacePlanet : MonoBehaviour
         p.AddSphere("Atmosphere", def.radius * 1.1f, FX.Ghost(new Color(0.4f, 0.7f, 1f, 0.08f)));
 
         // The cloud shell IS the door: fly through it to enter the world.
-        Color shell = def.weather == WeatherKind.Dust ? new Color(0.9f, 0.75f, 0.5f, 0.16f)
-                    : def.weather == WeatherKind.Snow ? new Color(0.85f, 0.9f, 1f, 0.15f)
+        Color shell = def.weather == WeatherKind.Dust  ? new Color(0.9f, 0.75f, 0.5f, 0.16f)
+                    : def.weather == WeatherKind.Snow  ? new Color(0.85f, 0.9f, 1f, 0.15f)
+                    : def.weather == WeatherKind.Ember ? new Color(1f, 0.5f, 0.3f, 0.17f)
                     : new Color(1f, 1f, 1f, 0.14f);
         p.cloudShell = p.AddSphere("CloudShell", def.EntryRadius, FX.Ghost(shell));
 

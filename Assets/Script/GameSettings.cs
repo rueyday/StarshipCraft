@@ -8,6 +8,7 @@ public static class GameSettings
     public static float npcSkill      = 1f;   // multiplies NPC turn rate, thrust and fire rate
     public static float mouseSens     = 0.55f;
     public static bool  invertY       = false;
+    public static float volume        = 0.8f; // master volume for all SFX
 
     public static void ApplyEasy()
     {

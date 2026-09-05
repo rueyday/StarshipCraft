@@ -3,14 +3,15 @@ using UnityEngine;
 // No Man's Sky-style atmosphere transitions: cross a world's cloud top and
 // you enter a different scene — its weather, thickening all the way down.
 //   Titanhold : a giant sand-gold dust storm
-//   Korrath   : drifting white cloud banks
+//   Korrath   : drifting white cloud banks (with lightning down deep)
 //   Vessa     : a blue-white snow storm
+//   Emberfall : ash murk full of rising embers
 // Driven entirely by GravityField sources; one instance lives in the scene.
 public class Weather : MonoBehaviour
 {
     static readonly Color SpaceBg = new Color(0.01f, 0.015f, 0.045f);
 
-    ParticleSystem dust, clouds, snow;
+    ParticleSystem dust, clouds, snow, embers;
     float lightningT = 6f;
 
     void Update()
@@ -75,6 +76,11 @@ public class Weather : MonoBehaviour
                     RenderSettings.fogDensity = 0.0006f + k * 0.004f;
                     skyTarget = Color.Lerp(SpaceBg, new Color(0.52f, 0.62f, 0.74f), k);
                     break;
+                case WeatherKind.Ember:
+                    RenderSettings.fogColor = new Color(0.3f, 0.13f, 0.07f);
+                    RenderSettings.fogDensity = 0.0009f + k * 0.005f;
+                    skyTarget = Color.Lerp(SpaceBg, new Color(0.24f, 0.08f, 0.04f), k);
+                    break;
             }
         }
 
@@ -111,6 +117,14 @@ public class Weather : MonoBehaviour
         {
             snow.transform.rotation = Quaternion.LookRotation(down);
             Drive(snow, kind == WeatherKind.Snow ? k * 320f : 0f, pos - down * 60f);
+        }
+
+        // Embers: sparks boiling up from below, ash murk all around.
+        if (kind == WeatherKind.Ember && embers == null) embers = FX.EmberStorm();
+        if (embers != null)
+        {
+            embers.transform.rotation = Quaternion.LookRotation(-down);
+            Drive(embers, kind == WeatherKind.Ember ? k * 260f : 0f, pos + down * 50f);
         }
     }
 

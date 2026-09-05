@@ -45,6 +45,9 @@ public class Bullet : MonoBehaviour
     void OnCollisionEnter(Collision col)
     {
         var other = col.collider.attachedRigidbody;
+        var gm = GameManager.Instance;
+        var myRb = GetComponent<Rigidbody>();
+        Vector3 travel = myRb != null ? myRb.velocity.normalized : transform.forward;
 
         // Check the collider itself first: belt rocks share the ring's
         // kinematic rigidbody, so the Asteroid lives on the collider's object.
@@ -53,6 +56,7 @@ public class Bullet : MonoBehaviour
         if (ast != null)
         {
             FX.Impact(transform.position, new Color(1f, 0.8f, 0.5f));
+            if (faction == Faction.Player && gm != null) gm.OnPlayerHitConfirm();
             ast.Hit(faction == Faction.Player);
             Destroy(gameObject);
             return;
@@ -62,6 +66,11 @@ public class Bullet : MonoBehaviour
         if (ship != null)
         {
             if (ship.faction == faction) { Destroy(gameObject); return; }
+            if (gm != null)
+            {
+                if (ship == gm.PlayerShip) gm.OnPlayerDamaged(-travel); // toward the shooter
+                else if (faction == Faction.Player) gm.OnPlayerHitConfirm();
+            }
             ship.TakeHit(col.GetContact(0).point);
             Destroy(gameObject);
             return;

@@ -83,11 +83,25 @@ public class ShipBuilder : MonoBehaviour
         if (animate) StartCoroutine(PopIn(go.transform));
     }
 
+    // Rebuild every block object from the (replaced) blueprint.
+    void ReloadVisuals()
+    {
+        foreach (var kv in objs) if (kv.Value != null) Destroy(kv.Value);
+        objs.Clear();
+        foreach (var kv in Blueprint.Blocks) CreateObj(kv.Key, kv.Value, true);
+    }
+
     void PaletteKey(KeyCode key, BlockType type)
     {
         if (!Input.GetKeyDown(key)) return;
+        SelectFromUi(type);
+    }
+
+    // Shared by keys and the tappable palette rows in the HUD.
+    public void SelectFromUi(BlockType type)
+    {
         Selected = Selected.type == type
-            ? new BlockDef(type, Selected.mk == 1 ? 2 : 1) // same key again: toggle tier
+            ? new BlockDef(type, Selected.mk == 1 ? 2 : 1) // same choice again: toggle tier
             : new BlockDef(type);
     }
 
@@ -116,10 +130,46 @@ public class ShipBuilder : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Tab))
             Selected = new BlockDef(Selected.type, Selected.mk == 1 ? 2 : 1);
 
-        // ── Orbit camera ──
+        // Ship codes: C copies the design to the clipboard, V loads one from it.
+        if (Input.GetKeyDown(KeyCode.C))
+        {
+            GUIUtility.systemCopyBuffer = NetCodec.Encode(Blueprint);
+            SFX.Ui(SFX.Id.Confirm, 0.7f);
+            if (GameManager.Instance != null)
+                GameManager.Instance.BuilderToast("Ship code copied to clipboard");
+        }
+        if (Input.GetKeyDown(KeyCode.V))
+        {
+            var pasted = NetCodec.Decode(GUIUtility.systemCopyBuffer);
+            if (pasted != null)
+            {
+                Blueprint.CopyFrom(pasted);
+                ReloadVisuals();
+                SFX.Ui(SFX.Id.Warp, 0.5f, 1.3f);
+                if (GameManager.Instance != null)
+                    GameManager.Instance.BuilderToast("Ship code loaded");
+            }
+            else if (GameManager.Instance != null)
+            {
+                SFX.Ui(SFX.Id.Click, 0.6f, 0.6f);
+                GameManager.Instance.BuilderToast("Clipboard has no valid ship code");
+            }
+        }
+
+        // ── Orbit camera (two-finger drag + pinch on touch) ──
         float ox = Input.GetAxis("Horizontal");
         float oy = Input.GetAxis("Vertical");
         if (Input.GetMouseButton(2)) { ox += Input.GetAxis("Mouse X") * 4f; oy += Input.GetAxis("Mouse Y") * 4f; }
+        if (TouchControls.Enabled && Input.touchCount == 2)
+        {
+            Touch a = Input.GetTouch(0), b = Input.GetTouch(1);
+            Vector2 avg = (a.deltaPosition + b.deltaPosition) * 0.5f;
+            yaw += avg.x * 0.25f;
+            pitch = Mathf.Clamp(pitch - avg.y * 0.2f, -80f, 80f);
+            float d0 = ((a.position - a.deltaPosition) - (b.position - b.deltaPosition)).magnitude;
+            float d1 = (a.position - b.position).magnitude;
+            dist = Mathf.Clamp(dist - (d1 - d0) * 0.02f, 4f, 30f);
+        }
         yaw   += ox * 90f * Time.deltaTime;
         pitch  = Mathf.Clamp(pitch + oy * 70f * Time.deltaTime, -80f, 80f);
         dist   = Mathf.Clamp(dist - Input.GetAxis("Mouse ScrollWheel") * 5f, 4f, 30f);
@@ -139,6 +189,14 @@ public class ShipBuilder : MonoBehaviour
             var target = aimed + Vector3Int.RoundToInt(
                 transform.InverseTransformDirection(hit.normal));
 
+            // Touch: one-finger tap acts (place, or remove in DEL mode);
+            // two fingers are the camera, so never edit then.
+            bool tap = Input.GetMouseButtonDown(0) &&
+                       !(TouchControls.Enabled && Input.touchCount > 1);
+            bool tapRemoves = TouchControls.Enabled && TouchControls.RemoveMode;
+            bool wantRemove = Input.GetMouseButtonDown(1) || (tap && tapRemoves);
+            bool wantPlace = tap && !tapRemoves;
+
             if (!Blueprint.Blocks.ContainsKey(target))
             {
                 ghost.SetActive(true);
@@ -148,14 +206,17 @@ public class ShipBuilder : MonoBehaviour
                 c.a = 0.22f + 0.16f * Mathf.Sin(pulseT * 6f);
                 ghostMat.color = c;
 
-                if (Input.GetMouseButtonDown(0) && Blueprint.TryAdd(target, Selected))
+                if (wantPlace && Blueprint.TryAdd(target, Selected))
                 {
                     CreateObj(target, Selected, true);
                     FX.Impact(transform.TransformPoint((Vector3)target), new Color(0.4f, 0.9f, 1f));
+                    SFX.Ui(SFX.Id.Place, 0.7f);
                 }
             }
 
-            if (Input.GetMouseButtonDown(1))
+            if (wantRemove)
+            {
+                bool removedAny = false;
                 foreach (var cell in Blueprint.Remove(aimed))
                 {
                     if (objs.TryGetValue(cell, out var go))
@@ -163,8 +224,11 @@ public class ShipBuilder : MonoBehaviour
                         FX.Impact(go.transform.position, new Color(1f, 0.6f, 0.3f));
                         Destroy(go);
                         objs.Remove(cell);
+                        removedAny = true;
                     }
                 }
+                if (removedAny) SFX.Ui(SFX.Id.Clank, 0.5f, 1.4f);
+            }
         }
     }
 }

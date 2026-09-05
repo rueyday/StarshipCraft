@@ -72,6 +72,24 @@ public class ShipBlueprint
 
     // ── Editing ──────────────────────────────────────────────────────────────
 
+    // Codec/network path: place without adjacency checks — callers run
+    // PruneDisconnected afterward, so stray blocks still can't survive.
+    public bool AddRaw(Vector3Int pos, BlockDef def)
+    {
+        if (def.type == BlockType.Core || Blocks.ContainsKey(pos)) return false;
+        Blocks[pos] = def;
+        return true;
+    }
+
+    // Replace this design with another (the core always survives).
+    public void CopyFrom(ShipBlueprint other)
+    {
+        Blocks.Clear();
+        foreach (var kv in other.Blocks) Blocks[kv.Key] = kv.Value;
+        if (!Blocks.ContainsKey(Vector3Int.zero))
+            Blocks[Vector3Int.zero] = new BlockDef(BlockType.Core);
+    }
+
     public bool TryAdd(Vector3Int pos, BlockDef def)
     {
         if (def.type == BlockType.Core || Blocks.ContainsKey(pos)) return false;

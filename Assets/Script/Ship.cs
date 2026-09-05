@@ -27,12 +27,13 @@ public class Ship : MonoBehaviour
     [HideInInspector] public bool    Brake;
     [HideInInspector] public bool    Turbo;        // hold to burn heat for raw speed
     [HideInInspector] public int     scoreValue = 500; // bounty paid when destroyed
+    [HideInInspector] public bool    RemoteAvatar;     // crew ghost: presence only, no damage
 
     const float ThrustPerBlock = 220f;
     const float BoostMult      = 1.9f;
     const float TorqueScale    = 26f;
     public const float MaxSpeed   = 55f;
-    public const float TurboSpeed = 320f; // long hops between planets
+    public const float TurboSpeed = 450f; // long hops across a wide system
     const float TurboAccel   = 300f;
     const float FireInterval = 0.24f;
 
@@ -62,6 +63,7 @@ public class Ship : MonoBehaviour
         Body.isKinematic = on;
         if (!on) Body.WakeUp();
         FX.Flash(transform.position, FX.Accent(faction), 2.5f, 0.25f);
+        SFX.Ui(SFX.Id.Clank, 0.8f, on ? 1f : 1.3f);
     }
 
     public void SetArmorMode(bool on)
@@ -70,6 +72,7 @@ public class Ship : MonoBehaviour
         if (on && !HasArmor()) return; // no plating, no shield
         ArmorMode = on;
         RefreshArmorGlow();
+        SFX.Ui(SFX.Id.Click, 0.8f, on ? 1.25f : 0.8f);
     }
 
     bool HasArmor()
@@ -115,6 +118,8 @@ public class Ship : MonoBehaviour
     float nextFire;
     int gunIndex;
     float pulseT;
+    AudioSource hum;
+    bool wasTurbo;
 
     // ── Construction ─────────────────────────────────────────────────────────
 
@@ -138,6 +143,8 @@ public class Ship : MonoBehaviour
             hp[kv.Key] = ShipBlueprint.HpOf(kv.Value);
         }
         RebuildPhysics();
+
+        if (faction == Faction.Player) hum = SFX.Loop(transform);
 
         var lgo = new GameObject("EngineLight");
         lgo.transform.SetParent(transform, false);
@@ -316,6 +323,15 @@ public class Ship : MonoBehaviour
         if (engineLight != null)
             engineLight.intensity = Mathf.Lerp(engineLight.intensity, burn * 2.4f, Time.deltaTime * 8f);
 
+        // Engine audio: hum tracks the burn, turbo howls, engagement whooshes.
+        if (hum != null)
+        {
+            hum.volume = (0.06f + burn * 0.28f) * GameSettings.volume;
+            hum.pitch = TurboActive ? 1.7f : 1f + burn * 0.15f;
+        }
+        if (TurboActive && !wasTurbo) SFX.Ui(SFX.Id.Warp, 0.45f, 0.8f);
+        wasTurbo = TurboActive;
+
         // RCS pods puff while the ship is turning.
         float turn = Mathf.Clamp01(TorqueInput.magnitude);
         foreach (var j in rcsJets)
@@ -350,6 +366,8 @@ public class Ship : MonoBehaviour
         float speed = gun.power >= 2f ? 125f : 90f;
         Vector3 muzzle = transform.TransformPoint((Vector3)gun.pos + Vector3.forward * 1.55f);
         FX.MuzzleFlash(muzzle, FX.Accent(faction));
+        SFX.Play(SFX.Id.Laser, muzzle, faction == Faction.Player ? 0.85f : 0.55f,
+                 faction == Faction.Player ? 1f : 0.9f);
         Bullet.Spawn(muzzle, transform.forward * speed + Body.velocity, faction, hullCol);
     }
 
@@ -360,6 +378,11 @@ public class Ship : MonoBehaviour
     public void TakeHit(Vector3 worldPoint)
     {
         if (bp == null || Body == null) return;
+        if (RemoteAvatar) // crew ghosts spark but never break — their machine owns them
+        {
+            FX.Impact(worldPoint, FX.Accent(faction));
+            return;
+        }
 
         Vector3 local = transform.InverseTransformPoint(worldPoint);
         Vector3Int nearest = Vector3Int.zero;
@@ -387,6 +410,8 @@ public class Ship : MonoBehaviour
             // Damaged but holding: sparks + progressively scorched body, and
             // the wound keeps leaking sparks and smoke until the block dies.
             FX.Impact(worldPoint, new Color(1f, 0.75f, 0.4f));
+            SFX.Play(SFX.Id.Hit, worldPoint, 0.7f, 1.1f);
+            if (faction == Faction.Player) SFX.Ui(SFX.Id.Hurt, 0.55f, 1.2f);
             if (bodyRends.TryGetValue(nearest, out var rend) && rend != null)
             {
                 float frac = (float)hp[nearest] / ShipBlueprint.HpOf(def);
@@ -418,8 +443,12 @@ public class Ship : MonoBehaviour
         RebuildPhysics();
         if (ArmorMode && !HasArmor()) { ArmorMode = false; } // shield broken
 
-        if (faction == Faction.Player && GameManager.Instance != null)
-            GameManager.Instance.CameraShake(0.5f);
+        SFX.Play(SFX.Id.Hit, worldPoint, 1f, 0.85f);
+        if (faction == Faction.Player)
+        {
+            SFX.Ui(SFX.Id.Hurt, 0.85f);
+            if (GameManager.Instance != null) GameManager.Instance.CameraShake(0.5f);
+        }
 
         // Out of engines: the player is stranded (no death — maybe they get
         // rescued by a clever plan); NPC hulks just blow up.
@@ -436,6 +465,7 @@ public class Ship : MonoBehaviour
     public void Die()
     {
         FX.Explosion(transform.position, FX.Accent(faction), 1.6f);
+        SFX.Play(SFX.Id.BigBoom, transform.position);
         int debris = 0;
         foreach (var go in blockObjs.Values)
         {
